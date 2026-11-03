@@ -1,26 +1,69 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #09090b;
+  --foreground: #ffffff;
+  --muted: #a1a1aa;
+  --card: #18181b;
+  --border: #27272a;
+  --accent: #f97316;
+  --accent-glow: rgba(249, 115, 22, 0.35);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+body {
+  background-color: #09090b;
+  color: #a1a1aa;
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  overflow-x: hidden;
+  min-height: 100vh;
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  color: #ffffff;
+}
+
+/* Custom glow and accent utilities */
+.glow-orange {
+  box-shadow: 0 0 25px rgba(249, 115, 22, 0.35);
+}
+
+.glow-orange-lg {
+  box-shadow: 0 0 45px rgba(249, 115, 22, 0.45);
+}
+
+.glow-orange-sm {
+  box-shadow: 0 0 15px rgba(249, 115, 22, 0.25);
+}
+
+.glow-orange-border {
+  border-color: rgba(249, 115, 22, 0.5);
+  box-shadow: 0 0 15px rgba(249, 115, 22, 0.2);
+}
+
+/* Subtle tech grid background */
+.bg-grid-pattern {
+  background-size: 40px 40px;
+  background-image:
+    linear-gradient(to right, rgba(39, 39, 42, 0.3) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(39, 39, 42, 0.3) 1px, transparent 1px);
+}
+
+.bg-dots-pattern {
+  background-image: radial-gradient(rgba(249, 115, 22, 0.15) 1px, transparent 1px);
+  background-size: 24px 24px;
 }
