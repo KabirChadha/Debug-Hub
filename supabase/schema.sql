@@ -53,6 +53,10 @@ alter table public.orders add column if not exists updated_at timestamptz defaul
 alter table public.orders add column if not exists deliverable_url text;
 alter table public.orders add column if not exists deliverable_storage_path text;
 alter table public.orders add column if not exists deliverable_file_name text;
+alter table public.orders add column if not exists service_type text default 'bug_fix';
+alter table public.orders add column if not exists project_title text;
+alter table public.orders add column if not exists requirements text;
+alter table public.orders add column if not exists quoted_price numeric;
 
 -- Enable Realtime publication on orders table
 do $$ begin

@@ -42,6 +42,10 @@ export async function GET(request: NextRequest) {
             order_code: "FIX-4921",
             contact_handle: "@student_tele",
             tech_stack: "Python/Flask",
+            service_type: "bug_fix",
+            project_title: null,
+            requirements: null,
+            quoted_price: null,
             issue_description: "Fatal: Unhandled CORS error on /api/predict when submitting POST from client. Exit code 1.",
             status: "submitted",
             file_name: "server_api.py",
@@ -52,7 +56,7 @@ export async function GET(request: NextRequest) {
             user_id: null,
             user_email: "student_flask@gmail.com",
             utr_number: null,
-            payment_status: "unpaid",
+            payment_status: "unquoted",
             created_at: new Date(Date.now() - 3600000).toISOString(),
           },
           {
@@ -60,6 +64,10 @@ export async function GET(request: NextRequest) {
             order_code: "FIX-8392",
             contact_handle: "@alex_capstone",
             tech_stack: "C / C++",
+            service_type: "bug_fix",
+            project_title: null,
+            requirements: null,
+            quoted_price: 650,
             issue_description: "Segmentation fault in graph traversal algorithm during memory reallocation.",
             status: "in_progress",
             file_name: "main_dijkstra.c",
@@ -78,6 +86,10 @@ export async function GET(request: NextRequest) {
             order_code: "FIX-6194",
             contact_handle: "@priya_ml",
             tech_stack: "MySQL/PostgreSQL",
+            service_type: "custom_project",
+            project_title: "Campus Blood Bank Management System",
+            requirements: "Multi-hospital database schema with real-time stock alert triggers and donor search.",
+            quoted_price: 1200,
             issue_description: "Deadlock on student table when bulk executing capstone registration transactions.",
             status: "proof_ready",
             file_name: "schema_migration.sql",
@@ -96,6 +108,10 @@ export async function GET(request: NextRequest) {
             order_code: "FIX-9281",
             contact_handle: "@rahul_dev",
             tech_stack: "React/Next.js",
+            service_type: "custom_project",
+            project_title: "Smart Attendance System with Face Recognition",
+            requirements: "Next.js frontend with FastAPI backend and SQLite database.",
+            quoted_price: 1500,
             issue_description: "Build failure in Next.js app router and repository architecture configuration.",
             status: "completed",
             file_name: "capstone_synopsis.docx",
@@ -130,6 +146,10 @@ export async function PATCH(request: NextRequest) {
     const { 
       order_code, 
       status, 
+      service_type,
+      project_title,
+      requirements,
+      quoted_price,
       proof_video_url, 
       fixed_zip_url, 
       deliverable_url,
@@ -149,6 +169,10 @@ export async function PATCH(request: NextRequest) {
 
     const updates: UpdateOrder = {};
     if (status) updates.status = status as OrderStatus;
+    if (service_type !== undefined) updates.service_type = service_type;
+    if (project_title !== undefined) updates.project_title = project_title;
+    if (requirements !== undefined) updates.requirements = requirements;
+    if (quoted_price !== undefined) updates.quoted_price = quoted_price === null ? null : Number(quoted_price);
     if (proof_video_url !== undefined) updates.proof_video_url = proof_video_url;
     if (fixed_zip_url !== undefined) updates.fixed_zip_url = fixed_zip_url;
     if (deliverable_url !== undefined) updates.deliverable_url = deliverable_url;

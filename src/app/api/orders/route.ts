@@ -53,19 +53,24 @@ export async function POST(request: NextRequest) {
       contact_handle, 
       tech_stack, 
       issue_description, 
+      service_type = "bug_fix",
+      project_title,
+      requirements,
+      quoted_price = null,
       zip_storage_path, 
       file_storage_path, 
       file_name,
       user_id,
       user_email,
       utr_number,
-      payment_status
+      payment_status = "unquoted"
     } = body;
 
     // Validate required fields
-    if (!order_code || !contact_handle || !tech_stack || !issue_description) {
+    const effectiveDescription = (issue_description || requirements || "").trim();
+    if (!order_code || !contact_handle || !tech_stack || !effectiveDescription) {
       return NextResponse.json(
-        { error: "Missing required fields (order_code, contact_handle, tech_stack, issue_description)" },
+        { error: "Missing required fields (order_code, contact_handle, tech_stack, issue_description/requirements)" },
         { status: 400 }
       );
     }
@@ -114,7 +119,11 @@ export async function POST(request: NextRequest) {
         order_code: order_code.trim().toUpperCase(),
         contact_handle: contact_handle.trim(),
         tech_stack: tech_stack.trim(),
-        issue_description: issue_description.trim(),
+        issue_description: effectiveDescription,
+        service_type: service_type || "bug_fix",
+        project_title: project_title?.trim() || null,
+        requirements: requirements?.trim() || null,
+        quoted_price: quoted_price ? Number(quoted_price) : null,
         file_name: resolvedFileName,
         file_storage_path: resolvedStoragePath,
         zip_storage_path: resolvedStoragePath,
@@ -122,7 +131,7 @@ export async function POST(request: NextRequest) {
         user_id: attachedUserId,
         user_email: attachedUserEmail,
         utr_number: utr_number || null,
-        payment_status: payment_status || "unpaid",
+        payment_status: payment_status || "unquoted",
       })
       .select()
       .single();
@@ -138,7 +147,7 @@ export async function POST(request: NextRequest) {
               order_code: order_code.trim().toUpperCase(),
               contact_handle: contact_handle.trim(),
               tech_stack: tech_stack.trim(),
-              issue_description: issue_description.trim(),
+              issue_description: effectiveDescription,
               file_name: resolvedFileName,
               file_storage_path: resolvedStoragePath,
               zip_storage_path: resolvedStoragePath,
@@ -152,10 +161,14 @@ export async function POST(request: NextRequest) {
               success: true,
               order: {
                 ...retryData,
+                service_type,
+                project_title,
+                requirements,
+                quoted_price,
                 user_id: attachedUserId,
                 user_email: attachedUserEmail,
                 utr_number: utr_number || null,
-                payment_status: payment_status || "unpaid",
+                payment_status: payment_status || "unquoted",
               },
             });
           }
@@ -171,7 +184,11 @@ export async function POST(request: NextRequest) {
           order_code,
           contact_handle,
           tech_stack,
-          issue_description,
+          issue_description: effectiveDescription,
+          service_type,
+          project_title,
+          requirements,
+          quoted_price,
           file_name: resolvedFileName,
           file_storage_path: resolvedStoragePath,
           zip_storage_path: resolvedStoragePath,
@@ -179,7 +196,7 @@ export async function POST(request: NextRequest) {
           user_id: attachedUserId,
           user_email: attachedUserEmail,
           utr_number: utr_number || null,
-          payment_status: payment_status || "unpaid",
+          payment_status: payment_status || "unquoted",
           created_at: new Date().toISOString(),
         },
         notice: "Order recorded in sandbox mode",

@@ -99,6 +99,11 @@ function AdminDashboardContent() {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
 
+  // Dynamic Quote states
+  const [quoteInputs, setQuoteInputs] = useState<Record<string, string>>({});
+  const [editingQuoteCodes, setEditingQuoteCodes] = useState<Record<string, boolean>>({});
+  const [isSendingQuote, setIsSendingQuote] = useState<Record<string, boolean>>({});
+
   // Action / Upload Modal states
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [activeModalOrder, setActiveModalOrder] = useState<Order | null>(null);
@@ -340,6 +345,81 @@ function AdminDashboardContent() {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to approve payment";
       alert("Failed to update payment status: " + msg);
+    }
+  };
+
+  // Action: Set / Update Quoted Price
+  const handleSetQuote = async (orderCode: string, price: number) => {
+    if (isNaN(price) || price <= 0) {
+      alert("Please enter a valid quote price in ₹.");
+      return;
+    }
+
+    setIsSendingQuote((prev) => ({ ...prev, [orderCode]: true }));
+
+    try {
+      const supabase = createClient();
+      let updateError = null;
+
+      const { error: directError } = await supabase
+        .from("orders")
+        .update({
+          quoted_price: price,
+          payment_status: "unpaid",
+          status: "quote_ready",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("order_code", orderCode);
+
+      updateError = directError;
+
+      if (updateError) {
+        const res = await fetch("/api/admin/orders", {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            "x-admin-key": adminKey,
+          },
+          body: JSON.stringify({
+            order_code: orderCode,
+            quoted_price: price,
+            payment_status: "unpaid",
+            status: "quote_ready",
+          }),
+        });
+
+        if (res.ok) {
+          updateError = null;
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          updateError = new Error(errData.error || "Failed to update quote via API");
+        }
+      }
+
+      if (updateError) {
+        alert("Failed to send quote: " + (updateError as Error).message);
+        return;
+      }
+
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.order_code === orderCode
+            ? { ...o, quoted_price: price, payment_status: "unpaid", status: "quote_ready" }
+            : o
+        )
+      );
+
+      setEditingQuoteCodes((prev) => ({ ...prev, [orderCode]: false }));
+      showToast(
+        `Quote Sent: #${orderCode}`,
+        `Custom quote of ₹${price} dispatched to client telemetry.`
+      );
+      fetchOrders(adminKey);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Error sending quote";
+      alert("Failed to send quote: " + msg);
+    } finally {
+      setIsSendingQuote((prev) => ({ ...prev, [orderCode]: false }));
     }
   };
 
@@ -667,10 +747,15 @@ function AdminDashboardContent() {
       o.contact_handle.toLowerCase().includes(searchQuery.toLowerCase()) ||
       o.tech_stack.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (o.user_email && o.user_email.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (o.utr_number && o.utr_number.toLowerCase().includes(searchQuery.toLowerCase()));
+      (o.utr_number && o.utr_number.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (o.project_title && o.project_title.toLowerCase().includes(searchQuery.toLowerCase()));
 
     if (statusFilter === "verifying_payment") {
       return matchesSearch && o.payment_status === "verifying";
+    }
+
+    if (statusFilter === "needs_quote") {
+      return matchesSearch && (o.quoted_price === null || o.quoted_price === undefined || o.payment_status === "unquoted");
     }
 
     const matchesStatus = statusFilter === "all" || o.status === statusFilter;
@@ -686,6 +771,7 @@ function AdminDashboardContent() {
     proof_ready: orders.filter((o) => o.status === "proof_ready").length,
     completed: orders.filter((o) => o.status === "completed").length,
     pending_utr: orders.filter((o) => o.payment_status === "verifying").length,
+    needs_quote: orders.filter((o) => o.quoted_price === null || o.quoted_price === undefined || o.payment_status === "unquoted").length,
   };
 
   // --------------------------------------------------------------------------
@@ -909,6 +995,17 @@ function AdminDashboardContent() {
               <Clock className="w-3.5 h-3.5" />
               <span>Pending UTR ({stats.pending_utr})</span>
             </button>
+
+            <button
+              onClick={() => setStatusFilter(statusFilter === "needs_quote" ? "all" : "needs_quote")}
+              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1 ${
+                statusFilter === "needs_quote"
+                  ? "bg-purple-500 text-white font-bold shadow-[0_0_12px_rgba(168,85,247,0.4)]"
+                  : "bg-[#09090b] text-purple-400 hover:text-purple-300 border border-purple-500/30"
+              }`}
+            >
+              <span>Needs Quote ({stats.needs_quote})</span>
+            </button>
           </div>
         </div>
 
@@ -921,9 +1018,9 @@ function AdminDashboardContent() {
                   <th className="py-3.5 px-4">Order Code</th>
                   <th className="py-3.5 px-4">Client / Student Email</th>
                   <th className="py-3.5 px-4">Tech Stack</th>
-                  <th className="py-3.5 px-4">Issue Description</th>
+                  <th className="py-3.5 px-4">Issue Description / Specs</th>
                   <th className="py-3.5 px-4">Status</th>
-                  <th className="py-3.5 px-4">Payment &amp; UTR</th>
+                  <th className="py-3.5 px-4 min-w-[190px]">Payment &amp; Quote</th>
                   <th className="py-3.5 px-4">Submitted</th>
                   <th className="py-3.5 px-4 min-w-[170px]">INTAKE FILE</th>
                   <th className="py-3.5 px-4 text-right">Actions</th>
@@ -941,17 +1038,36 @@ function AdminDashboardContent() {
                     return (
                       <tr key={order.id || order.order_code} className="hover:bg-[#09090b]/40 transition-colors">
                         
-                        {/* Order Code */}
+                        {/* Order Code & Service Type Badge */}
                         <td className="py-4 px-4 font-mono">
-                          <Link
-                            href={`/order/${order.order_code}`}
-                            target="_blank"
-                            className="font-bold text-orange-400 hover:text-orange-300 hover:underline flex items-center gap-1"
-                            title="Open Client View"
-                          >
-                            <span>{order.order_code}</span>
-                            <ExternalLink className="w-3 h-3 text-zinc-500" />
-                          </Link>
+                          <div className="flex flex-col gap-1 items-start">
+                            <Link
+                              href={`/order/${order.order_code}`}
+                              target="_blank"
+                              className="font-bold text-orange-400 hover:text-orange-300 hover:underline flex items-center gap-1"
+                              title="Open Client View"
+                            >
+                              <span>{order.order_code}</span>
+                              <ExternalLink className="w-3 h-3 text-zinc-500" />
+                            </Link>
+
+                            {order.service_type === "custom_project" ? (
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="bg-purple-500/15 text-purple-400 border border-purple-500/30 font-bold px-1.5 py-0.5 rounded text-[9px] font-mono whitespace-nowrap">
+                                  [New Project]
+                                </span>
+                                {order.project_title && (
+                                  <span className="text-[10px] font-semibold text-zinc-200 truncate max-w-[120px]" title={order.project_title}>
+                                    {order.project_title}
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="bg-sky-500/15 text-sky-400 border border-sky-500/30 font-bold px-1.5 py-0.5 rounded text-[9px] font-mono whitespace-nowrap">
+                                [Bug Fix]
+                              </span>
+                            )}
+                          </div>
                         </td>
 
                         {/* Client Handle & Student Email */}
@@ -978,10 +1094,10 @@ function AdminDashboardContent() {
                           </span>
                         </td>
 
-                        {/* Issue Description */}
+                        {/* Issue Description / Project Specs */}
                         <td className="py-4 px-4 max-w-xs">
-                          <p className="text-zinc-300 font-mono text-[11px] line-clamp-2" title={order.issue_description}>
-                            {order.issue_description}
+                          <p className="text-zinc-300 font-mono text-[11px] line-clamp-2" title={order.requirements || order.issue_description}>
+                            {order.requirements || order.issue_description}
                           </p>
                         </td>
 
@@ -991,6 +1107,12 @@ function AdminDashboardContent() {
                             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 whitespace-nowrap">
                               <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
                               Submitted
+                            </span>
+                          )}
+                          {order.status === "quote_ready" && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-blue-500/10 text-blue-400 border border-blue-500/30 whitespace-nowrap">
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+                              Quote Ready
                             </span>
                           )}
                           {order.status === "in_progress" && (
@@ -1013,23 +1135,95 @@ function AdminDashboardContent() {
                           )}
                         </td>
 
-                        {/* Payment Status & Submitted UTR */}
+                        {/* Payment Status, Quote & Submitted UTR */}
                         <td className="py-4 px-4">
-                          <div className="flex flex-col gap-1 items-start">
-                            {order.payment_status === "approved" ? (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 whitespace-nowrap">
-                                <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                                Approved (₹400)
-                              </span>
-                            ) : order.payment_status === "verifying" ? (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30 whitespace-nowrap animate-pulse">
-                                <Clock className="w-3 h-3 text-amber-400" />
-                                Verifying UTR
-                              </span>
+                          <div className="flex flex-col gap-1.5 items-start">
+                            {/* If unquoted or currently editing quote */}
+                            {(order.quoted_price === null || order.quoted_price === undefined || order.payment_status === "unquoted" || editingQuoteCodes[order.order_code]) ? (
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="number"
+                                  placeholder="Quote ₹"
+                                  value={
+                                    quoteInputs[order.order_code] !== undefined
+                                      ? quoteInputs[order.order_code]
+                                      : (order.quoted_price ? String(order.quoted_price) : "")
+                                  }
+                                  onChange={(e) =>
+                                    setQuoteInputs((prev) => ({
+                                      ...prev,
+                                      [order.order_code]: e.target.value,
+                                    }))
+                                  }
+                                  className="w-20 bg-[#09090b] border border-orange-500/40 text-white text-xs px-2 py-1 rounded font-mono focus:outline-none focus:border-orange-500"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const val = quoteInputs[order.order_code] !== undefined 
+                                      ? Number(quoteInputs[order.order_code]) 
+                                      : (order.quoted_price || 0);
+                                    handleSetQuote(order.order_code, val);
+                                  }}
+                                  disabled={isSendingQuote[order.order_code]}
+                                  className="px-2 py-1 rounded bg-orange-500 hover:bg-orange-600 text-white font-bold text-[10px] cursor-pointer disabled:opacity-50 whitespace-nowrap shadow-[0_0_10px_rgba(249,115,22,0.3)]"
+                                >
+                                  {isSendingQuote[order.order_code] ? "Sending..." : "Send Quote"}
+                                </button>
+                                {editingQuoteCodes[order.order_code] && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setEditingQuoteCodes((prev) => ({
+                                        ...prev,
+                                        [order.order_code]: false,
+                                      }))
+                                    }
+                                    className="text-zinc-500 hover:text-white p-0.5 text-xs cursor-pointer"
+                                    title="Cancel"
+                                  >
+                                    ✕
+                                  </button>
+                                )}
+                              </div>
                             ) : (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-zinc-800 text-zinc-400 border border-zinc-700 whitespace-nowrap">
-                                Unpaid (₹400)
-                              </span>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {order.payment_status === "approved" ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 whitespace-nowrap">
+                                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                                    Approved (₹{order.quoted_price})
+                                  </span>
+                                ) : order.payment_status === "verifying" ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30 whitespace-nowrap animate-pulse">
+                                    <Clock className="w-3 h-3 text-amber-400" />
+                                    Verifying UTR (₹{order.quoted_price})
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-zinc-800 text-zinc-300 border border-zinc-700 whitespace-nowrap">
+                                    Quoted: ₹{order.quoted_price}
+                                  </span>
+                                )}
+
+                                {order.payment_status !== "approved" && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setQuoteInputs((prev) => ({
+                                        ...prev,
+                                        [order.order_code]: String(order.quoted_price || ""),
+                                      }));
+                                      setEditingQuoteCodes((prev) => ({
+                                        ...prev,
+                                        [order.order_code]: true,
+                                      }));
+                                    }}
+                                    className="text-zinc-500 hover:text-orange-400 text-[10px] font-mono underline ml-0.5 cursor-pointer"
+                                    title="Adjust quote"
+                                  >
+                                    Edit
+                                  </button>
+                                )}
+                              </div>
                             )}
 
                             {order.utr_number ? (

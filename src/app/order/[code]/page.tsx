@@ -413,17 +413,31 @@ function OrderDetailsContent() {
                 <Terminal className="w-6 h-6" />
               </div>
               <div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-xs font-mono uppercase tracking-wider text-orange-400 font-bold">
                     CAPSTONE TELEMETRY STATUS
                   </span>
                   <span className="text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full">
                     LIVE
                   </span>
+                  {order.service_type === "custom_project" ? (
+                    <span className="text-[10px] font-mono bg-purple-500/15 text-purple-400 border border-purple-500/30 px-2 py-0.5 rounded-full font-bold">
+                      [New Project Build]
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-mono bg-sky-500/15 text-sky-400 border border-sky-500/30 px-2 py-0.5 rounded-full font-bold">
+                      [Bug Fix]
+                    </span>
+                  )}
                 </div>
                 <h1 className="text-2xl sm:text-3xl font-extrabold text-white mt-0.5">
                   Order #{orderCode}
                 </h1>
+                {order.project_title && (
+                  <p className="text-xs font-mono text-zinc-400 mt-0.5 font-medium">
+                    Topic: <span className="text-white font-semibold">{order.project_title}</span>
+                  </p>
+                )}
               </div>
             </div>
 
@@ -461,17 +475,21 @@ function OrderDetailsContent() {
               </span>
             </div>
             <div className="p-3.5 rounded-xl bg-[#09090b] border border-[#27272a]">
-              <span className="text-zinc-500 block mb-1">Mounted File</span>
-              <span className="font-mono text-orange-400 font-semibold truncate block" title={order.file_name || "project_source"}>
-                {order.file_name || (order.file_storage_path ? order.file_storage_path.split("/").pop() : "project_source")}
+              <span className="text-zinc-500 block mb-1">
+                {order.service_type === "custom_project" ? "Project Specs" : "Mounted File"}
+              </span>
+              <span className="font-mono text-orange-400 font-semibold truncate block" title={order.file_name || order.project_title || "project_source"}>
+                {order.file_name || order.project_title || (order.file_storage_path ? order.file_storage_path.split("/").pop() : "project_source")}
               </span>
             </div>
             <div className="p-3.5 rounded-xl bg-[#09090b] border border-[#27272a]">
               <span className="text-zinc-500 block mb-1">Rate &amp; SLA</span>
-              <span className="text-orange-400 font-medium">Flat ₹400 • 1–2 Hr</span>
+              <span className="text-orange-400 font-medium">
+                {order.quoted_price ? `Quote: ₹${order.quoted_price} • Pay If Verified` : "Quote: Pending Assessment"}
+              </span>
             </div>
             
-            {/* Status Badge: Displayed as 'Status: Completed / Delivered' when isPaidOrCompleted */}
+            {/* Status Badge */}
             <div className="p-3.5 rounded-xl bg-[#09090b] border border-[#27272a] col-span-2 sm:col-span-1">
               <span className="text-zinc-500 block mb-1">Status</span>
               {isPaidOrCompleted ? (
@@ -484,9 +502,14 @@ function OrderDetailsContent() {
                   <Clock className="w-3.5 h-3.5" />
                   <span>Verifying UTR</span>
                 </span>
+              ) : (order.payment_status === "unquoted" || order.quoted_price === null || order.quoted_price === undefined) ? (
+                <span className="text-blue-400 font-medium flex items-center gap-1">
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>Awaiting Engineer Quote</span>
+                </span>
               ) : (
                 <span className="text-zinc-400 font-medium">
-                  Unpaid (₹400)
+                  Unpaid (₹{order.quoted_price})
                 </span>
               )}
             </div>
@@ -756,8 +779,44 @@ function OrderDetailsContent() {
                   </button>
                 </div>
               </div>
+            ) : (!order.quoted_price || order.payment_status === "unquoted") ? (
+              /* 3. AWAITING QUOTE: Assessment Banner */
+              <div className="p-6 sm:p-8 rounded-2xl bg-[#09090b] border border-orange-500/40 shadow-2xl relative glow-orange-border animate-in fade-in duration-300 space-y-4">
+                <div className="flex items-start gap-4 pb-4 border-b border-[#27272a]">
+                  <div className="w-12 h-12 rounded-xl bg-orange-500/10 border border-orange-500/30 text-orange-400 flex items-center justify-center flex-shrink-0">
+                    <Clock className="w-6 h-6 animate-pulse" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-mono uppercase tracking-widest text-orange-400 font-bold">
+                      ASSESSMENT STAGE
+                    </span>
+                    <h3 className="text-xl sm:text-2xl font-extrabold text-white mt-0.5">
+                      Project Under Assessment
+                    </h3>
+                    <p className="text-xs sm:text-sm text-zinc-400 mt-1">
+                      Our engineer is reviewing your requirements. A custom quote will be published here shortly (Turnaround: 15–30 mins).
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-xl bg-[#18181b] border border-[#27272a] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div className="text-xs text-zinc-300 font-mono">
+                    <span className="text-zinc-500 block text-[10px]">CURRENT QUEUE STATUS:</span>
+                    <span>Assessing specifications &amp; environment complexity...</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCheckStatus}
+                    disabled={isRefreshing}
+                    className="px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-mono text-xs font-bold transition-all shadow-[0_0_15px_rgba(249,115,22,0.3)] flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
+                    <span>{isRefreshing ? "Checking..." : "Check for Quote Update"}</span>
+                  </button>
+                </div>
+              </div>
             ) : (
-              /* 3. UNPAID STATE: UPI PAYMENT CARD & UTR INPUT FORM */
+              /* 4. UNPAID STATE WITH QUOTE: UPI PAYMENT CARD & UTR INPUT FORM */
               <div className="p-6 sm:p-8 rounded-2xl bg-[#09090b] border border-orange-500/40 shadow-2xl relative glow-orange-border animate-in fade-in duration-300">
                 <div className="flex items-start gap-4 pb-5 border-b border-[#27272a]">
                   <div className="w-12 h-12 rounded-xl bg-orange-500/10 border border-orange-500/30 text-orange-400 flex items-center justify-center flex-shrink-0">
@@ -768,10 +827,10 @@ function OrderDetailsContent() {
                       PLEDGE CONFIRMATION
                     </span>
                     <h3 className="text-xl sm:text-2xl font-extrabold text-white mt-0.5">
-                      Flat Rate • ₹400 • No Run = ₹0 Charged
+                      Pledge Confirmation: ₹{order.quoted_price} via Merchant UPI
                     </h3>
                     <p className="text-xs sm:text-sm text-zinc-400 mt-1">
-                      Your project is completely fixed and verified. Please complete payment of ₹400 to unlock your complete fixed code package.
+                      Your project is completely fixed and verified. Please complete payment of ₹{order.quoted_price} to unlock your complete fixed code package.
                     </p>
                   </div>
                 </div>
@@ -810,17 +869,17 @@ function OrderDetailsContent() {
 
                     {/* Pay Directly via UPI Intent App */}
                     <a
-                      href={`upi://pay?pa=${UPI_ID}&pn=CampusCodeFix&am=400&cu=INR&tn=Order%20${orderCode}`}
+                      href={`upi://pay?pa=${UPI_ID}&pn=CampusCodeFix&am=${order.quoted_price}&cu=INR&tn=Order%20${orderCode}`}
                       className="px-4 py-2 rounded-xl bg-orange-500/15 hover:bg-orange-500 text-orange-400 hover:text-white border border-orange-500/30 text-xs font-bold transition-all flex items-center justify-center gap-1.5 self-start sm:self-auto"
                     >
                       <QrCode className="w-4 h-4" />
-                      <span>Open in UPI App (₹400)</span>
+                      <span>Open in UPI App (₹{order.quoted_price})</span>
                     </a>
                   </div>
 
                   <div className="text-xs text-zinc-400 space-y-1 border-t border-zinc-800 pt-3">
                     <p>1. Open Google Pay, PhonePe, Paytm, or BHIM.</p>
-                    <p>2. Send <strong>₹400</strong> to UPI ID: <strong className="text-white font-mono">{UPI_ID}</strong></p>
+                    <p>2. Send <strong>₹{order.quoted_price}</strong> to UPI ID: <strong className="text-white font-mono">{UPI_ID}</strong></p>
                     <p>3. Copy the 12-digit UPI UTR / Transaction Reference number and submit below.</p>
                   </div>
                 </div>

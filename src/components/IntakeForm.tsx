@@ -17,7 +17,9 @@ import {
   ArrowRight,
   MessageSquare,
   Mail,
-  Sparkles
+  Sparkles,
+  Layers,
+  Wrench
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Toast } from "./Toast";
@@ -158,6 +160,11 @@ export function IntakeForm() {
   // User state
   const [user, setUser] = useState<User | null>(null);
 
+  // Service type state: Bug fix vs Custom build
+  const [serviceType, setServiceType] = useState<"bug_fix" | "custom_project">("bug_fix");
+  const [projectTitle, setProjectTitle] = useState("");
+  const [requirements, setRequirements] = useState("");
+
   // Form states
   const [contactHandle, setContactHandle] = useState("");
   const [studentEmail, setStudentEmail] = useState("");
@@ -276,8 +283,18 @@ export function IntakeForm() {
     e.preventDefault();
     setFileError(null);
 
-    if (!file) {
+    if (serviceType === "bug_fix" && !file) {
       setFileError("Please attach your project archive or source file so our engineers can test it.");
+      return;
+    }
+
+    if (serviceType === "custom_project" && !projectTitle.trim()) {
+      setFileError("Please provide a Project Title or Topic.");
+      return;
+    }
+
+    if (serviceType === "custom_project" && !requirements.trim()) {
+      setFileError("Please describe your problem statement and feature requirements.");
       return;
     }
 
@@ -288,35 +305,39 @@ export function IntakeForm() {
     const orderCode = generateTrackingCode();
     const chosenStack = techStack === "Other" && customStack.trim() ? customStack.trim() : techStack;
     
-    // Preserve original filename, sanitizing for storage key
-    const originalFileName = file.name;
-    const sanitizedFileName = originalFileName.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const storagePath = `raw/${orderCode}/${sanitizedFileName}`;
+    // Preserve original filename, sanitizing for storage key if file exists
+    const originalFileName = file ? file.name : null;
+    const sanitizedFileName = originalFileName ? originalFileName.replace(/[^a-zA-Z0-9._-]/g, "_") : null;
+    const storagePath = sanitizedFileName ? `raw/${orderCode}/${sanitizedFileName}` : null;
 
     try {
-      // 1. Upload file directly to Supabase storage 'project-intakes'
-      setStatusMessage(`Uploading ${originalFileName} to 'project-intakes'...`);
-      
-      const supabase = createClient();
-      
-      // Simulate stepped progress during upload
-      const progressTimer = setInterval(() => {
-        setUploadProgress((prev) => (prev < 85 ? prev + 15 : prev));
-      }, 250);
+      // 1. Upload file directly to Supabase storage 'project-intakes' if file provided
+      if (file && storagePath) {
+        setStatusMessage(`Uploading ${originalFileName} to 'project-intakes'...`);
+        
+        const supabase = createClient();
+        
+        // Simulate stepped progress during upload
+        const progressTimer = setInterval(() => {
+          setUploadProgress((prev) => (prev < 85 ? prev + 15 : prev));
+        }, 250);
 
-      const { error: uploadError } = await supabase.storage
-        .from("project-intakes")
-        .upload(storagePath, file, {
-          cacheControl: "3600",
-          upsert: true,
-          contentType: file.type || "application/octet-stream",
-        });
+        const { error: uploadError } = await supabase.storage
+          .from("project-intakes")
+          .upload(storagePath, file, {
+            cacheControl: "3600",
+            upsert: true,
+            contentType: file.type || "application/octet-stream",
+          });
 
-      clearInterval(progressTimer);
-      setUploadProgress(90);
+        clearInterval(progressTimer);
+        setUploadProgress(90);
 
-      if (uploadError) {
-        console.warn("Storage upload notice (dev mode fallback):", uploadError.message);
+        if (uploadError) {
+          console.warn("Storage upload notice (dev mode fallback):", uploadError.message);
+        }
+      } else {
+        setUploadProgress(90);
       }
 
       // 2. Insert order record into the 'orders' table via API handler
@@ -336,14 +357,18 @@ export function IntakeForm() {
           order_code: orderCode,
           contact_handle: contactHandle.trim() || effectiveUserEmail || "@anonymous_student",
           tech_stack: chosenStack,
-          issue_description: issueDescription.trim(),
+          issue_description: serviceType === "bug_fix" ? issueDescription.trim() : requirements.trim(),
+          service_type: serviceType,
+          project_title: serviceType === "custom_project" ? projectTitle.trim() : null,
+          requirements: serviceType === "custom_project" ? requirements.trim() : null,
           file_name: originalFileName,
           file_storage_path: storagePath,
           zip_storage_path: storagePath,
           user_id: user?.id || null,
           user_email: effectiveUserEmail,
-          payment_status: "unpaid",
+          payment_status: "unquoted",
           status: "submitted",
+          quoted_price: null,
         }),
       });
 
@@ -397,10 +422,10 @@ export function IntakeForm() {
               <span>DIRECT DISPATCH INTAKE</span>
             </div>
             <h3 className="text-2xl font-extrabold text-white tracking-tight">
-              Submit Broken Code for 1–2 Hr Triage
+              {serviceType === "bug_fix" ? "Submit Broken Code for 1–2 Hr Triage" : "Submit Project Specs for Rapid Build"}
             </h3>
             <p className="text-xs sm:text-sm text-[#a1a1aa] mt-1">
-              Flat rate <strong className="text-orange-400">₹400</strong> • Guaranteed run or ₹0 charge. Includes verified proof recording.
+              Transparent Quote After Review • Pay Only If Verified. Includes verified proof recording.
             </p>
           </div>
 
@@ -408,6 +433,65 @@ export function IntakeForm() {
             <ShieldCheck className="w-4 h-4 text-emerald-400 flex-shrink-0" />
             <span>100% Anonymous &amp; Encrypted</span>
           </div>
+        </div>
+
+        {/* Service Selector Toggle */}
+        <div className="mb-7 grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+          <button
+            type="button"
+            onClick={() => {
+              setServiceType("bug_fix");
+              setFileError(null);
+            }}
+            className={`p-4 rounded-2xl border text-left transition-all duration-200 cursor-pointer flex items-start gap-3.5 ${
+              serviceType === "bug_fix"
+                ? "bg-orange-500/15 border-orange-500 shadow-[0_0_20px_rgba(249,115,22,0.3)] text-white"
+                : "bg-[#09090b] border-[#27272a] text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+            }`}
+          >
+            <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
+              serviceType === "bug_fix" ? "bg-orange-500 text-white" : "bg-[#18181b] text-zinc-500"
+            }`}>
+              <Wrench className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-sm text-white">Fix Existing Project</span>
+                <span className="text-[10px] font-mono font-bold bg-orange-500/20 text-orange-400 px-2 py-0.5 rounded">Option 1</span>
+              </div>
+              <p className="text-xs text-zinc-400 mt-1">
+                Resolve compilation crashes, dependency errors, runtime bugs, and broken setup.
+              </p>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setServiceType("custom_project");
+              setFileError(null);
+            }}
+            className={`p-4 rounded-2xl border text-left transition-all duration-200 cursor-pointer flex items-start gap-3.5 ${
+              serviceType === "custom_project"
+                ? "bg-purple-500/15 border-purple-500 shadow-[0_0_20px_rgba(168,85,247,0.3)] text-white"
+                : "bg-[#09090b] border-[#27272a] text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+            }`}
+          >
+            <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
+              serviceType === "custom_project" ? "bg-purple-500 text-white" : "bg-[#18181b] text-zinc-500"
+            }`}>
+              <Layers className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-sm text-white">Build Project from Scratch</span>
+                <span className="text-[10px] font-mono font-bold bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded">Option 2</span>
+              </div>
+              <p className="text-xs text-zinc-400 mt-1">
+                Complete mini-project or capstone built to your problem statement &amp; syllabus specs.
+              </p>
+            </div>
+          </button>
         </div>
 
         {/* Auth Integration Banner */}
@@ -483,10 +567,27 @@ export function IntakeForm() {
             </div>
           </div>
 
+          {/* Field: Project Title (Custom Project only) */}
+          {serviceType === "custom_project" && (
+            <div>
+              <label className="block text-xs font-mono uppercase tracking-wider text-purple-400 font-bold mb-2">
+                Project Title / Topic <span className="text-red-400">*</span>
+              </label>
+              <input
+                type="text"
+                required
+                value={projectTitle}
+                onChange={(e) => setProjectTitle(e.target.value)}
+                placeholder="e.g. AI Mock Interview Portal or Hospital Management System"
+                className="w-full bg-[#09090b] border border-[#27272a] text-white text-sm rounded-xl px-4 py-3 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all font-mono placeholder:text-zinc-600"
+              />
+            </div>
+          )}
+
           {/* Field 2: Tech Stack selector (Pill buttons) */}
           <div>
             <label className="block text-xs font-mono uppercase tracking-wider text-orange-400 font-bold mb-2.5">
-              2. Tech Stack Selector <span className="text-red-400">*</span>
+              {serviceType === "custom_project" ? "Target Tech Stack" : "2. Tech Stack Selector"} <span className="text-red-400">*</span>
             </label>
             
             <div className="flex flex-wrap gap-2.5">
@@ -524,25 +625,49 @@ export function IntakeForm() {
             )}
           </div>
 
-          {/* Field 3: Issue Description Textarea */}
-          <div>
-            <label className="block text-xs font-mono uppercase tracking-wider text-orange-400 font-bold mb-2">
-              3. Issue Description <span className="text-red-400">*</span>
-            </label>
-            <textarea
-              required
-              rows={4}
-              value={issueDescription}
-              onChange={(e) => setIssueDescription(e.target.value)}
-              placeholder="What is crashing or failing to run before your review? (Paste terminal error stack trace, failing commands, broken dependencies, or exit codes...)"
-              className="w-full bg-[#09090b] border border-[#27272a] text-white text-xs sm:text-sm rounded-xl p-3.5 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all font-mono placeholder:text-zinc-600 leading-relaxed"
-            />
-          </div>
+          {/* Field 3: Issue Description or Problem Statement */}
+          {serviceType === "bug_fix" ? (
+            <div>
+              <label className="block text-xs font-mono uppercase tracking-wider text-orange-400 font-bold mb-2">
+                3. Issue Description <span className="text-red-400">*</span>
+              </label>
+              <textarea
+                required
+                rows={4}
+                value={issueDescription}
+                onChange={(e) => setIssueDescription(e.target.value)}
+                placeholder="What is crashing or failing to run before your review? (Paste terminal error stack trace, failing commands, broken dependencies, or exit codes...)"
+                className="w-full bg-[#09090b] border border-[#27272a] text-white text-xs sm:text-sm rounded-xl p-3.5 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all font-mono placeholder:text-zinc-600 leading-relaxed"
+              />
+            </div>
+          ) : (
+            <div>
+              <label className="block text-xs font-mono uppercase tracking-wider text-purple-400 font-bold mb-2">
+                Problem Statement &amp; Feature Requirements <span className="text-red-400">*</span>
+              </label>
+              <textarea
+                required
+                rows={5}
+                value={requirements}
+                onChange={(e) => setRequirements(e.target.value)}
+                placeholder="Describe your project: core features, user roles (e.g. admin/user), mandatory pages/screens, database schemas, or specific libraries to use..."
+                className="w-full bg-[#09090b] border border-[#27272a] text-white text-xs sm:text-sm rounded-xl p-3.5 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all font-mono placeholder:text-zinc-600 leading-relaxed"
+              />
+            </div>
+          )}
 
-          {/* Field 4: Drag-and-drop file uploader with dynamic icon & badge feedback */}
+          {/* Field 4: Drag-and-drop file uploader (Mandatory for bug_fix, Optional for custom_project) */}
           <div>
             <label className="block text-xs font-mono uppercase tracking-wider text-orange-400 font-bold mb-2">
-              4. Upload project archive (.zip, .rar) or source files (.py, .c, .cpp, .docx, .pdf, etc.) <span className="text-red-400">*</span>
+              {serviceType === "bug_fix" ? (
+                <>
+                  4. Upload project archive (.zip, .rar) or source files (.py, .c, .cpp, .docx, .pdf, etc.) <span className="text-red-400">*</span>
+                </>
+              ) : (
+                <>
+                  Upload Syllabus / Guidelines / Reference Doc (.pdf, .docx, .zip) <span className="text-zinc-500 text-[10px] font-normal lowercase">(optional)</span>
+                </>
+              )}
             </label>
 
             <input
@@ -569,10 +694,15 @@ export function IntakeForm() {
                   <Upload className="w-6 h-6 text-orange-500 group-hover:scale-110 transition-transform" />
                 </div>
                 <h4 className="text-sm font-bold text-white group-hover:text-orange-400 transition-colors">
-                  Drag &amp; drop project archive or source file here, or <span className="text-orange-400 underline underline-offset-4">browse</span>
+                  {serviceType === "bug_fix" 
+                    ? "Drag & drop project archive or source file here, or " 
+                    : "Drag & drop project guidelines, rubric PDF, or starter archive, or "}
+                  <span className="text-orange-400 underline underline-offset-4">browse</span>
                 </h4>
                 <p className="text-xs text-zinc-500 mt-1 max-w-md mx-auto">
-                  Supports code (.py, .c, .cpp, .java, .js, .sql), documents (.docx, .pdf, .txt, .md), and archives (.zip, .rar) up to 50MB.
+                  {serviceType === "bug_fix"
+                    ? "Supports code (.py, .c, .cpp, .java, .js, .sql), documents (.docx, .pdf, .txt, .md), and archives (.zip, .rar) up to 50MB."
+                    : "Optional reference materials, project guidelines, rubric PDF, or existing starter code."}
                 </p>
                 <div className="mt-3 inline-flex items-center gap-1.5 text-[11px] font-mono text-zinc-400 bg-[#18181b] px-3 py-1 rounded-full border border-[#27272a]">
                   <span>🔒 Direct storage upload to `project-intakes`</span>
@@ -659,7 +789,7 @@ export function IntakeForm() {
             <div className="flex items-center gap-2.5 text-xs text-zinc-400">
               <ShieldCheck className="w-5 h-5 text-orange-400 flex-shrink-0" />
               <span>
-                <strong className="text-white">Flat Rate • ₹400 • No Run = ₹0 Charged:</strong> Pay only after verified proof.
+                <strong className="text-white">Transparent Quote After Review • Pay Only If Verified:</strong> Zero upfront payment required.
               </span>
             </div>
 
@@ -668,7 +798,7 @@ export function IntakeForm() {
               disabled={isSubmitting}
               className="px-8 py-4 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm transition-all duration-200 shadow-[0_0_25px_rgba(249,115,22,0.4)] hover:shadow-[0_0_35px_rgba(249,115,22,0.6)] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
-              <span>{isSubmitting ? "Dispatching To Engineer..." : "Submit For Instant Debug"}</span>
+              <span>{isSubmitting ? "Dispatching..." : serviceType === "bug_fix" ? "Submit For Instant Debug" : "Submit For Project Quote"}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>

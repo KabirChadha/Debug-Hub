@@ -87,6 +87,13 @@ export default function DashboardPage() {
             Queued in Sandbox
           </span>
         );
+      case "quote_ready":
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-purple-500/10 text-purple-400 border border-purple-500/30">
+            <Clock className="w-3.5 h-3.5" />
+            Quote Ready
+          </span>
+        );
       case "in_progress":
         return (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-orange-500/10 text-orange-400 border border-orange-500/30 animate-pulse">
@@ -217,7 +224,7 @@ export default function DashboardPage() {
                   href="/#submit-code"
                   className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold transition-all shadow-[0_0_20px_rgba(249,115,22,0.3)]"
                 >
-                  <span>Submit Code for ₹400 Triage</span>
+                  <span>Submit Code for Triage</span>
                   <ArrowRight className="w-3.5 h-3.5" />
                 </Link>
               </div>

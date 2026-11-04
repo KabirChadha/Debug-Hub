@@ -36,7 +36,7 @@ export function Footer() {
             </div>
             <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-[#18181b] border border-[#27272a] text-zinc-300">
               <Shield className="w-3.5 h-3.5 text-orange-400" />
-              <span>Flat Rate • ₹400 • No Run = ₹0 Charged</span>
+              <span>Transparent Quote After Review • Pay Only If Verified</span>
             </div>
           </div>
 

@@ -6,8 +6,9 @@ export type Json =
   | { [key: string]: Json | undefined }
   | Json[];
 
-export type OrderStatus = 'submitted' | 'in_progress' | 'proof_ready' | 'completed';
-export type PaymentStatus = 'unpaid' | 'verifying' | 'pending_verification' | 'approved' | 'completed';
+export type OrderStatus = 'submitted' | 'quote_ready' | 'in_progress' | 'proof_ready' | 'completed';
+export type PaymentStatus = 'unquoted' | 'unpaid' | 'verifying' | 'pending_verification' | 'approved' | 'completed';
+export type ServiceType = 'bug_fix' | 'custom_project';
 
 export interface Database {
   public: {
@@ -19,6 +20,10 @@ export interface Database {
           contact_handle: string;
           tech_stack: string;
           issue_description: string;
+          service_type?: ServiceType | null;
+          project_title?: string | null;
+          requirements?: string | null;
+          quoted_price?: number | null;
           status: OrderStatus;
           file_name: string | null;
           file_storage_path: string | null;
@@ -44,6 +49,10 @@ export interface Database {
           contact_handle: string;
           tech_stack: string;
           issue_description: string;
+          service_type?: ServiceType | null;
+          project_title?: string | null;
+          requirements?: string | null;
+          quoted_price?: number | null;
           status?: OrderStatus;
           file_name?: string | null;
           file_storage_path?: string | null;
@@ -69,6 +78,10 @@ export interface Database {
           contact_handle?: string;
           tech_stack?: string;
           issue_description?: string;
+          service_type?: ServiceType | null;
+          project_title?: string | null;
+          requirements?: string | null;
+          quoted_price?: number | null;
           status?: OrderStatus;
           file_name?: string | null;
           file_storage_path?: string | null;
