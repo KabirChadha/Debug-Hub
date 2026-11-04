@@ -50,6 +50,9 @@ alter table public.orders add column if not exists utr_number text;
 alter table public.orders add column if not exists payment_status text not null default 'unpaid';
 alter table public.orders add column if not exists is_paid boolean default false;
 alter table public.orders add column if not exists updated_at timestamptz default now();
+alter table public.orders add column if not exists deliverable_url text;
+alter table public.orders add column if not exists deliverable_storage_path text;
+alter table public.orders add column if not exists deliverable_file_name text;
 
 -- Enable Realtime publication on orders table
 do $$ begin

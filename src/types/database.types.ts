@@ -28,6 +28,8 @@ export interface Database {
           proof_video_url: string | null;
           fixed_zip_url: string | null;
           deliverable_url?: string | null;
+          deliverable_storage_path?: string | null;
+          deliverable_file_name?: string | null;
           is_paid?: boolean | null;
           user_id: string | null;
           user_email: string | null;
@@ -51,6 +53,8 @@ export interface Database {
           proof_video_url?: string | null;
           fixed_zip_url?: string | null;
           deliverable_url?: string | null;
+          deliverable_storage_path?: string | null;
+          deliverable_file_name?: string | null;
           is_paid?: boolean | null;
           user_id?: string | null;
           user_email?: string | null;
@@ -74,6 +78,8 @@ export interface Database {
           proof_video_url?: string | null;
           fixed_zip_url?: string | null;
           deliverable_url?: string | null;
+          deliverable_storage_path?: string | null;
+          deliverable_file_name?: string | null;
           is_paid?: boolean | null;
           user_id?: string | null;
           user_email?: string | null;
@@ -108,6 +114,8 @@ export interface Database {
           proof_video_url: string | null;
           fixed_zip_url: string | null;
           deliverable_url?: string | null;
+          deliverable_storage_path?: string | null;
+          deliverable_file_name?: string | null;
           is_paid?: boolean | null;
           user_id: string | null;
           user_email: string | null;

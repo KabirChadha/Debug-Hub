@@ -234,7 +234,19 @@ export async function GET(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   try {
     const body = await request.json();
-    const { order_code, status, proof_video_url, fixed_zip_url, utr_number, payment_status, is_paid, updated_at } = body;
+    const { 
+      order_code, 
+      status, 
+      proof_video_url, 
+      fixed_zip_url, 
+      deliverable_url,
+      deliverable_storage_path,
+      deliverable_file_name,
+      utr_number, 
+      payment_status, 
+      is_paid, 
+      updated_at 
+    } = body;
 
     if (!order_code) {
       return NextResponse.json({ error: "Missing order_code" }, { status: 400 });
@@ -247,6 +259,9 @@ export async function PATCH(request: NextRequest) {
     if (status) updates.status = status as OrderStatus;
     if (proof_video_url !== undefined) updates.proof_video_url = proof_video_url;
     if (fixed_zip_url !== undefined) updates.fixed_zip_url = fixed_zip_url;
+    if (deliverable_url !== undefined) updates.deliverable_url = deliverable_url;
+    if (deliverable_storage_path !== undefined) updates.deliverable_storage_path = deliverable_storage_path;
+    if (deliverable_file_name !== undefined) updates.deliverable_file_name = deliverable_file_name;
     if (utr_number !== undefined) updates.utr_number = utr_number;
     if (payment_status !== undefined) updates.payment_status = payment_status;
     if (is_paid !== undefined) updates.is_paid = is_paid;

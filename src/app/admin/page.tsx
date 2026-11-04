@@ -431,7 +431,7 @@ function AdminDashboardContent() {
     );
   };
 
-  // Execute Upload in Modal with direct-to-storage support for files up to 50MB
+  // Execute Upload in Modal with direct-to-storage support for deliverables and proof videos
   const handleUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedFile || !activeModalOrder || !uploadType) {
@@ -441,88 +441,167 @@ function AdminDashboardContent() {
 
     setIsUploading(true);
     setUploadError(null);
-
-    const cleanCode = activeModalOrder.order_code.trim().toUpperCase();
-    const fileName = uploadType === "video" ? "proof-video.mp4" : "fixed-project.zip";
-    const storagePath = `${cleanCode}/${fileName}`;
+    const order = activeModalOrder;
+    const cleanCode = order.order_code.trim().toUpperCase();
 
     try {
-      let finalUrl = "";
-
-      // 1. For direct delivery to Supabase Storage (bypasses Vercel 4.5MB serverless limit)
       const supabase = createClient();
-      const { data: storageUploadData, error: storageError } = await supabase.storage
+
+      // Case A: Proof Video Upload
+      if (uploadType === "video") {
+        const cleanName = selectedFile.name.replace(/[^a-zA-Z0-9.-]/g, "_");
+        const videoPath = `${cleanCode}/proof/${Date.now()}_${cleanName}`;
+
+        const { error: videoUploadError } = await supabase.storage
+          .from("deliverables")
+          .upload(videoPath, selectedFile, {
+            cacheControl: "3600",
+            upsert: true,
+            contentType: selectedFile.type || "video/mp4",
+          });
+
+        if (videoUploadError) {
+          console.error("Video upload error:", videoUploadError);
+          alert(`Failed to upload proof video: ${videoUploadError.message}`);
+          setIsUploading(false);
+          return;
+        }
+
+        const { data: videoUrlData } = supabase.storage
+          .from("deliverables")
+          .getPublicUrl(videoPath);
+
+        const videoUrl = videoUrlData.publicUrl;
+
+        const { error: dbError } = await supabase
+          .from("orders")
+          .update({
+            proof_video_url: videoUrl,
+            status: "proof_ready",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("order_code", cleanCode);
+
+        if (dbError) {
+          await fetch("/api/admin/orders", {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              "x-admin-key": adminKey,
+            },
+            body: JSON.stringify({
+              order_code: cleanCode,
+              proof_video_url: videoUrl,
+              status: "proof_ready",
+            }),
+          });
+        }
+
+        alert("Proof video uploaded successfully!");
+        setActiveModalOrder(null);
+        setUploadType(null);
+        setSelectedFile(null);
+        setUploadError(null);
+        setIsUploading(false);
+        fetchOrders(adminKey);
+        return;
+      }
+
+      // Case B: Reupload / Upload Fixed Solution
+      const cleanName = selectedFile.name.replace(/[^a-zA-Z0-9.-]/g, "_");
+      const filePath = `${order.order_code}/deliverables/${Date.now()}_${cleanName}`;
+
+      // Upload to deliverables bucket with upsert
+      const { error: uploadError } = await supabase.storage
         .from("deliverables")
-        .upload(storagePath, selectedFile, {
-          contentType: selectedFile.type || (uploadType === "video" ? "video/mp4" : "application/zip"),
+        .upload(filePath, selectedFile, {
+          cacheControl: "3600",
           upsert: true,
         });
 
-      if (!storageError && storageUploadData) {
-        const { data: publicData } = supabase.storage.from("deliverables").getPublicUrl(storagePath);
-        finalUrl = publicData?.publicUrl || `/api/deliverables?code=${cleanCode}&type=${uploadType}`;
-      } else {
-        // Fallback: If direct client upload fails, attempt serverless route
-        const formData = new FormData();
-        formData.append("file", selectedFile);
-        formData.append("order_code", activeModalOrder.order_code);
-        formData.append("type", uploadType);
+      if (uploadError) {
+        console.error("Deliverable upload error:", uploadError);
+        alert(`Failed to upload deliverable: ${uploadError.message}`);
+        setIsUploading(false);
+        return;
+      }
 
-        const res = await fetch("/api/admin/upload", {
-          method: "POST",
-          headers: {
-            "x-admin-key": adminKey,
-          },
-          body: formData,
-        });
+      const { data: urlData } = supabase.storage
+        .from("deliverables")
+        .getPublicUrl(filePath);
 
-        const data = await res.json();
-        if (res.ok && data.success) {
-          finalUrl = data.url;
+      const deliverableUrl = urlData.publicUrl;
+
+      // Update Database Record
+      let { error: dbError } = await supabase
+        .from("orders")
+        .update({
+          deliverable_url: deliverableUrl,
+          fixed_zip_url: deliverableUrl,
+          deliverable_storage_path: filePath,
+          deliverable_file_name: selectedFile.name,
+          status: "completed",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("order_code", order.order_code);
+
+      // Fallback: If direct client update encountered RLS or column cache issues, fallback
+      if (dbError) {
+        const { error: retryError } = await supabase
+          .from("orders")
+          .update({
+            deliverable_url: deliverableUrl,
+            fixed_zip_url: deliverableUrl,
+            deliverable_storage_path: filePath,
+            deliverable_file_name: selectedFile.name,
+            status: "completed",
+          })
+          .eq("order_code", order.order_code);
+
+        if (!retryError) {
+          dbError = null;
         } else {
-          // Fallback demo URL if in local sandbox/unconfigured keys mode
-          finalUrl = `/api/deliverables?code=${cleanCode}&type=${uploadType}`;
+          const res = await fetch("/api/admin/orders", {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              "x-admin-key": adminKey,
+            },
+            body: JSON.stringify({
+              order_code: order.order_code,
+              deliverable_url: deliverableUrl,
+              fixed_zip_url: deliverableUrl,
+              deliverable_storage_path: filePath,
+              deliverable_file_name: selectedFile.name,
+              status: "completed",
+              updated_at: new Date().toISOString(),
+            }),
+          });
+
+          if (res.ok) {
+            dbError = null;
+          }
         }
       }
 
-      // 2. Persist update in database
-      await fetch("/api/admin/orders", {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          "x-admin-key": adminKey,
-        },
-        body: JSON.stringify({
-          order_code: cleanCode,
-          ...(uploadType === "video"
-            ? { proof_video_url: finalUrl, status: "proof_ready" }
-            : { fixed_zip_url: finalUrl }),
-        }),
-      });
+      if (dbError) {
+        console.error("Database update error:", dbError);
+        alert(`Failed to save deliverable link: ${dbError.message}`);
+        setIsUploading(false);
+        return;
+      }
 
-      // Update local UI state
-      setOrders((prev) =>
-        prev.map((o) => {
-          if (o.order_code === activeModalOrder.order_code) {
-            return uploadType === "video"
-              ? { ...o, proof_video_url: finalUrl, status: "proof_ready" }
-              : { ...o, fixed_zip_url: finalUrl };
-          }
-          return o;
-        })
-      );
-
-      showToast(
-        uploadType === "video" ? "Proof Video Uploaded" : "Fixed Solution Uploaded",
-        `Order ${activeModalOrder.order_code} updated successfully.`
-      );
-
+      alert("Deliverable re-uploaded successfully!");
       setActiveModalOrder(null);
       setUploadType(null);
       setSelectedFile(null);
-    } catch {
-      setUploadError("Upload network failure. Please retry.");
-    } finally {
+      setUploadError(null);
+      setIsUploading(false);
+      fetchOrders(adminKey);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Upload network failure";
+      setUploadError(msg);
+      alert(`Upload error: ${msg}`);
       setIsUploading(false);
     }
   };
@@ -1065,13 +1144,13 @@ function AdminDashboardContent() {
             <form onSubmit={handleUploadSubmit} className="mt-5 space-y-4">
               <div>
                 <label className="block text-xs font-mono uppercase tracking-wider text-orange-400 font-bold mb-2">
-                  {uploadType === "video" ? "Select MP4 / WebM Execution Recording" : "Select Fixed Project Archive (.zip) for Deliverables Bucket"}
+                  {uploadType === "video" ? "Select MP4 / WebM Execution Recording" : "Select Fixed Project Archive / Solution Code for Deliverables Bucket"}
                 </label>
                 
                 <input
                   type="file"
                   ref={fileInputRef}
-                  accept={uploadType === "video" ? "video/mp4,video/webm,video/*" : ".zip,.rar,.tar.gz,.7z"}
+                  accept={uploadType === "video" ? "video/mp4,video/webm,video/*" : ".zip,.rar,.tar.gz,.7z,.py,.c,.cpp,.java,.js,.ts,.jsx,.tsx,.html,.css,.sql,.doc,.docx,.pdf,.txt,.md"}
                   onChange={(e) => {
                     const files = e.target.files;
                     if (files && files[0]) {
