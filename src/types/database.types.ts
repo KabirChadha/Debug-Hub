@@ -22,6 +22,8 @@ export interface Database {
           status: OrderStatus;
           file_name: string | null;
           file_storage_path: string | null;
+          file_url?: string | null;
+          intake_file_path?: string | null;
           zip_storage_path: string | null;
           proof_video_url: string | null;
           fixed_zip_url: string | null;
@@ -40,6 +42,8 @@ export interface Database {
           status?: OrderStatus;
           file_name?: string | null;
           file_storage_path?: string | null;
+          file_url?: string | null;
+          intake_file_path?: string | null;
           zip_storage_path?: string | null;
           proof_video_url?: string | null;
           fixed_zip_url?: string | null;
@@ -58,6 +62,8 @@ export interface Database {
           status?: OrderStatus;
           file_name?: string | null;
           file_storage_path?: string | null;
+          file_url?: string | null;
+          intake_file_path?: string | null;
           zip_storage_path?: string | null;
           proof_video_url?: string | null;
           fixed_zip_url?: string | null;
@@ -87,6 +93,8 @@ export interface Database {
           status: OrderStatus;
           file_name: string | null;
           file_storage_path: string | null;
+          file_url?: string | null;
+          intake_file_path?: string | null;
           zip_storage_path: string | null;
           proof_video_url: string | null;
           fixed_zip_url: string | null;

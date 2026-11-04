@@ -318,89 +318,82 @@ function AdminDashboardContent() {
   };
 
   // Action: Download original student code / source file directly from 'project-intakes'
-  const handleDownloadStudentFile = async (order: Order) => {
-    const filePath = order.file_storage_path || order.zip_storage_path;
-    if (!filePath) {
-      showToast(
-        "File not found in storage.",
-        "Ensure the student completed file upload."
-      );
+  const handleDownloadIntake = async (order: Order) => {
+    // 1. Check order.file_url if directly accessible
+    if (order.file_url) {
+      window.open(order.file_url, "_blank");
       return;
     }
 
-    const fileName =
-      order.file_name ||
-      filePath.split("/").pop() ||
-      `student-source-${order.order_code}`;
+    // 2. Locate intake storage path from order record
+    const storagePath =
+      order.file_storage_path ||
+      order.intake_file_path ||
+      order.zip_storage_path;
 
-    setDownloadingOrderId(order.id || order.order_code);
+    if (storagePath) {
+      const fileName =
+        order.file_name ||
+        storagePath.split("/").pop() ||
+        `intake-${order.order_code}`;
 
-    try {
-      // 1. Direct query via Supabase client to 'project-intakes' bucket
-      const supabase = createClient();
-      const { data, error } = await supabase.storage
-        .from("project-intakes")
-        .createSignedUrl(filePath, 3600, { download: fileName });
+      setDownloadingOrderId(order.id || order.order_code);
 
-      if (!error && data?.signedUrl) {
-        const a = document.createElement("a");
-        a.href = data.signedUrl;
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        showToast("Download Started", `Fetching ${fileName} from project-intakes`);
-        return;
-      }
+      try {
+        // Direct query via Supabase client to 'project-intakes' bucket
+        const supabase = createClient();
+        const { data, error } = await supabase.storage
+          .from("project-intakes")
+          .createSignedUrl(storagePath, 3600, { download: fileName });
 
-      // 2. Authoritative server-side download via admin endpoint
-      const res = await fetch(
-        `/api/admin/download-intake?code=${encodeURIComponent(order.order_code)}&path=${encodeURIComponent(filePath)}&filename=${encodeURIComponent(fileName)}`,
-        {
-          headers: {
-            "x-admin-key": adminKey,
-          },
-        }
-      );
-
-      if (!res.ok) {
-        throw new Error("File not found in storage. Ensure the student completed file upload.");
-      }
-
-      const contentType = res.headers.get("content-type") || "";
-      if (contentType.includes("application/json")) {
-        const json = await res.json();
-        if (json.signedUrl) {
-          const a = document.createElement("a");
-          a.href = json.signedUrl;
-          a.download = fileName;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          showToast("Download Started", `Fetching ${fileName} from project-intakes`);
+        if (!error && data?.signedUrl) {
+          window.open(data.signedUrl, "_blank");
           return;
         }
-        throw new Error(json.error || "File not found in storage. Ensure the student completed file upload.");
-      }
 
-      const blob = await res.blob();
-      const objectUrl = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = objectUrl;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(objectUrl);
-      showToast("Download Complete", `Downloaded ${fileName}`);
-    } catch {
-      showToast(
-        "File not found in storage.",
-        "Ensure the student completed file upload."
-      );
-    } finally {
-      setDownloadingOrderId(null);
+        // Authoritative server-side download via admin endpoint
+        const res = await fetch(
+          `/api/admin/download-intake?code=${encodeURIComponent(order.order_code)}&path=${encodeURIComponent(storagePath)}&filename=${encodeURIComponent(fileName)}`,
+          {
+            headers: {
+              "x-admin-key": adminKey,
+            },
+          }
+        );
+
+        if (res.ok) {
+          const contentType = res.headers.get("content-type") || "";
+          if (contentType.includes("application/json")) {
+            const json = await res.json();
+            if (json.signedUrl) {
+              window.open(json.signedUrl, "_blank");
+              return;
+            }
+          } else {
+            const blob = await res.blob();
+            const objectUrl = window.URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = objectUrl;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(objectUrl);
+            return;
+          }
+        }
+      } catch (err) {
+        console.error("Intake file download error:", err);
+      } finally {
+        setDownloadingOrderId(null);
+      }
     }
+
+    alert("Intake file not found in Supabase storage.");
+    showToast(
+      "Intake file not found in Supabase storage.",
+      "Ensure the student completed file upload."
+    );
   };
 
   // Execute Upload in Modal with direct-to-storage support for files up to 50MB
@@ -750,7 +743,7 @@ function AdminDashboardContent() {
                   <th className="py-3.5 px-4">Status</th>
                   <th className="py-3.5 px-4">Payment &amp; UTR</th>
                   <th className="py-3.5 px-4">Submitted</th>
-                  <th className="py-3.5 px-4 min-w-[220px]">Student Submission</th>
+                  <th className="py-3.5 px-4 min-w-[170px]">INTAKE FILE</th>
                   <th className="py-3.5 px-4 text-right">Actions</th>
                 </tr>
               </thead>
@@ -880,14 +873,14 @@ function AdminDashboardContent() {
                           {(() => {
                             const fileName =
                               order.file_name ||
-                              (order.file_storage_path || order.zip_storage_path || "").split("/").pop() ||
-                              `student-code-${order.order_code}.zip`;
+                              (order.file_storage_path || order.intake_file_path || order.zip_storage_path || "").split("/").pop() ||
+                              `client-intake-${order.order_code}.zip`;
                             const { badge, style } = getAdminFileBadge(fileName);
                             const isDownloading = downloadingOrderId === (order.id || order.order_code);
 
                             return (
-                              <div className="flex flex-col gap-2 items-start min-w-[190px]">
-                                <div className="flex items-center gap-1.5 max-w-[220px]" title={fileName}>
+                              <div className="flex flex-col gap-1 items-start min-w-[130px]">
+                                <div className="flex items-center gap-1.5 max-w-[180px]" title={fileName}>
                                   <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border ${style}`}>
                                     {badge}
                                   </span>
@@ -897,17 +890,17 @@ function AdminDashboardContent() {
                                 </div>
                                 <button
                                   type="button"
-                                  onClick={() => handleDownloadStudentFile(order)}
+                                  onClick={() => handleDownloadIntake(order)}
                                   disabled={isDownloading}
-                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#09090b] hover:bg-zinc-800 text-orange-400 hover:text-orange-300 border border-[#27272a] hover:border-orange-500/50 text-[10px] font-mono transition-all whitespace-nowrap cursor-pointer disabled:opacity-50 shadow-sm"
-                                  title={`Download original student source file (${fileName}) directly from Supabase Storage bucket 'project-intakes'`}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#09090b] hover:bg-zinc-800 text-orange-400 border border-[#27272a] hover:border-orange-500/40 text-[10px] font-mono transition-colors whitespace-nowrap cursor-pointer disabled:opacity-50"
+                                  title={`Download ${fileName}`}
                                 >
                                   {isDownloading ? (
                                     <RefreshCw className="w-3 h-3 text-orange-400 animate-spin" />
                                   ) : (
                                     <Download className="w-3 h-3 text-orange-400" />
                                   )}
-                                  <span>{isDownloading ? "Downloading..." : "Download Student Code / Source File"}</span>
+                                  <span>{isDownloading ? "Downloading..." : "Download"}</span>
                                 </button>
                               </div>
                             );
