@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, Suspense, useRef } from "react";
+import React, { useState, useEffect, useCallback, Suspense, useRef, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { 
   Terminal, 
@@ -75,22 +75,19 @@ function getAdminFileBadge(fileName: string) {
   return { badge: ext.startsWith("[") ? ext : `[${ext}]`, style: "bg-orange-500/15 text-orange-400 border-orange-500/30" };
 }
 
+const emptySubscribe = () => () => {};
+
 function AdminDashboardContent() {
-  // Authentication state - lazy initialized from session storage
-  const [adminKey, setAdminKey] = useState<string>(() => {
-    if (typeof window !== "undefined") {
-      return sessionStorage.getItem("ccf_admin_key") || "";
-    }
-    return "";
-  });
+  // Hydration safety mount state via official useSyncExternalStore
+  const isMounted = useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false
+  );
 
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    if (typeof window !== "undefined") {
-      return Boolean(sessionStorage.getItem("ccf_admin_key"));
-    }
-    return false;
-  });
-
+  // Authentication state
+  const [adminKey, setAdminKey] = useState<string>("");
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [passcodeInput, setPasscodeInput] = useState<string>("");
   const [authError, setAuthError] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState<boolean>(false);
@@ -103,6 +100,7 @@ function AdminDashboardContent() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
 
   // Action / Upload Modal states
+  const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [activeModalOrder, setActiveModalOrder] = useState<Order | null>(null);
   const [uploadType, setUploadType] = useState<"video" | "fixed_zip" | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -122,13 +120,31 @@ function AdminDashboardContent() {
     setIsToastVisible(true);
   };
 
+  // Mount effect: Ensure client-dependent state (sessionStorage, timestamps) only runs after mount
+  useEffect(() => {
+    let ignore = false;
+    Promise.resolve().then(() => {
+      if (!ignore && typeof window !== "undefined") {
+        const storedKey = sessionStorage.getItem("ccf_admin_key");
+        if (storedKey) {
+          setAdminKey(storedKey);
+          setIsAuthenticated(true);
+        }
+      }
+    });
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
   // Fetch orders from API
-  const fetchOrders = useCallback(async (keyToUse: string) => {
-    if (!keyToUse) return;
+  const fetchOrders = useCallback(async (keyToUse?: string) => {
+    const key = keyToUse || adminKey;
+    if (!key) return;
     setIsLoadingOrders(true);
     try {
       const res = await fetch("/api/admin/orders", {
-        headers: { "x-admin-key": keyToUse },
+        headers: { "x-admin-key": key },
       });
 
       if (res.status === 401) {
@@ -147,7 +163,7 @@ function AdminDashboardContent() {
     } finally {
       setIsLoadingOrders(false);
     }
-  }, []);
+  }, [adminKey]);
 
   // Effect to load orders when authenticated
   useEffect(() => {
@@ -255,6 +271,7 @@ function AdminDashboardContent() {
     setUploadType(type);
     setSelectedFile(null);
     setUploadError(null);
+    setIsModalOpen(true);
   };
 
   // Action 4: Approve Payment (Sets payment_status='approved', status='completed', is_paid=true)
@@ -431,178 +448,215 @@ function AdminDashboardContent() {
     );
   };
 
-  // Execute Upload in Modal with direct-to-storage support for deliverables and proof videos
-  const handleUploadSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedFile || !activeModalOrder || !uploadType) {
-      setUploadError("Please select a file to upload.");
+  // Action: Upload & Sync Reuploaded / Fixed Deliverable Solution directly to 'deliverables' bucket
+  const handleReuploadSolution = async (orderCode: string, file: File) => {
+    if (!file) {
+      alert("Please select a file to upload.");
       return;
     }
 
     setIsUploading(true);
     setUploadError(null);
-    const order = activeModalOrder;
-    const cleanCode = order.order_code.trim().toUpperCase();
+
+    // 1. Sanitize file name & generate storage path
+    const cleanName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
+    const filePath = `${orderCode}/deliverables/${Date.now()}_${cleanName}`;
 
     try {
       const supabase = createClient();
 
-      // Case A: Proof Video Upload
-      if (uploadType === "video") {
-        const cleanName = selectedFile.name.replace(/[^a-zA-Z0-9.-]/g, "_");
-        const videoPath = `${cleanCode}/proof/${Date.now()}_${cleanName}`;
-
-        const { error: videoUploadError } = await supabase.storage
-          .from("deliverables")
-          .upload(videoPath, selectedFile, {
-            cacheControl: "3600",
-            upsert: true,
-            contentType: selectedFile.type || "video/mp4",
-          });
-
-        if (videoUploadError) {
-          console.error("Video upload error:", videoUploadError);
-          alert(`Failed to upload proof video: ${videoUploadError.message}`);
-          setIsUploading(false);
-          return;
-        }
-
-        const { data: videoUrlData } = supabase.storage
-          .from("deliverables")
-          .getPublicUrl(videoPath);
-
-        const videoUrl = videoUrlData.publicUrl;
-
-        const { error: dbError } = await supabase
-          .from("orders")
-          .update({
-            proof_video_url: videoUrl,
-            status: "proof_ready",
-            updated_at: new Date().toISOString(),
-          })
-          .eq("order_code", cleanCode);
-
-        if (dbError) {
-          await fetch("/api/admin/orders", {
-            method: "PATCH",
-            headers: {
-              "Content-Type": "application/json",
-              "x-admin-key": adminKey,
-            },
-            body: JSON.stringify({
-              order_code: cleanCode,
-              proof_video_url: videoUrl,
-              status: "proof_ready",
-            }),
-          });
-        }
-
-        alert("Proof video uploaded successfully!");
-        setActiveModalOrder(null);
-        setUploadType(null);
-        setSelectedFile(null);
-        setUploadError(null);
-        setIsUploading(false);
-        fetchOrders(adminKey);
-        return;
-      }
-
-      // Case B: Reupload / Upload Fixed Solution
-      const cleanName = selectedFile.name.replace(/[^a-zA-Z0-9.-]/g, "_");
-      const filePath = `${order.order_code}/deliverables/${Date.now()}_${cleanName}`;
-
-      // Upload to deliverables bucket with upsert
+      // 2. Upload file to deliverables bucket with upsert: true
       const { error: uploadError } = await supabase.storage
         .from("deliverables")
-        .upload(filePath, selectedFile, {
+        .upload(filePath, file, {
           cacheControl: "3600",
           upsert: true,
+          contentType: file.type || "application/octet-stream",
         });
 
       if (uploadError) {
         console.error("Deliverable upload error:", uploadError);
         alert(`Failed to upload deliverable: ${uploadError.message}`);
+        setUploadError(uploadError.message);
         setIsUploading(false);
         return;
       }
 
+      // 3. Get public URL
       const { data: urlData } = supabase.storage
         .from("deliverables")
         .getPublicUrl(filePath);
 
       const deliverableUrl = urlData.publicUrl;
 
-      // Update Database Record
+      // 4. Update orders row in Supabase
       let { error: dbError } = await supabase
         .from("orders")
         .update({
           deliverable_url: deliverableUrl,
           fixed_zip_url: deliverableUrl,
           deliverable_storage_path: filePath,
-          deliverable_file_name: selectedFile.name,
+          deliverable_file_name: file.name,
           status: "completed",
           updated_at: new Date().toISOString(),
         })
-        .eq("order_code", order.order_code);
+        .eq("order_code", orderCode);
 
-      // Fallback: If direct client update encountered RLS or column cache issues, fallback
+      // Fallback: If direct client update hit RLS or schema column cache, fallback to admin API
       if (dbError) {
-        const { error: retryError } = await supabase
-          .from("orders")
-          .update({
+        const res = await fetch("/api/admin/orders", {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            "x-admin-key": adminKey,
+          },
+          body: JSON.stringify({
+            order_code: orderCode,
             deliverable_url: deliverableUrl,
             fixed_zip_url: deliverableUrl,
             deliverable_storage_path: filePath,
-            deliverable_file_name: selectedFile.name,
+            deliverable_file_name: file.name,
             status: "completed",
-          })
-          .eq("order_code", order.order_code);
+            updated_at: new Date().toISOString(),
+          }),
+        });
 
-        if (!retryError) {
+        if (res.ok) {
           dbError = null;
-        } else {
-          const res = await fetch("/api/admin/orders", {
-            method: "PATCH",
-            headers: {
-              "Content-Type": "application/json",
-              "x-admin-key": adminKey,
-            },
-            body: JSON.stringify({
-              order_code: order.order_code,
-              deliverable_url: deliverableUrl,
-              fixed_zip_url: deliverableUrl,
-              deliverable_storage_path: filePath,
-              deliverable_file_name: selectedFile.name,
-              status: "completed",
-              updated_at: new Date().toISOString(),
-            }),
-          });
-
-          if (res.ok) {
-            dbError = null;
-          }
         }
       }
 
       if (dbError) {
         console.error("Database update error:", dbError);
-        alert(`Failed to save deliverable link: ${dbError.message}`);
+        alert(`Storage upload succeeded, but database sync failed: ${dbError.message}`);
+        setUploadError(dbError.message);
         setIsUploading(false);
         return;
       }
 
-      alert("Deliverable re-uploaded successfully!");
+      alert("Deliverable re-uploaded and synced successfully!");
+      showToast(`Deliverable Synced: #${orderCode}`, "Deliverable solution file is now live.");
+      setIsUploading(false);
+      setIsModalOpen(false);
       setActiveModalOrder(null);
       setUploadType(null);
       setSelectedFile(null);
-      setUploadError(null);
-      setIsUploading(false);
-      fetchOrders(adminKey);
+      fetchOrders();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Upload network failure";
-      setUploadError(msg);
+      const msg = err instanceof Error ? err.message : "Deliverable upload failure";
+      console.error("Deliverable upload exception:", err);
       alert(`Upload error: ${msg}`);
+      setUploadError(msg);
       setIsUploading(false);
+    }
+  };
+
+  // Action: Upload Proof Video directly to 'deliverables' bucket
+  const handleUploadProofVideo = async (orderCode: string, file: File) => {
+    if (!file) {
+      alert("Please select a video to upload.");
+      return;
+    }
+
+    setIsUploading(true);
+    setUploadError(null);
+
+    const cleanCode = orderCode.trim().toUpperCase();
+    const cleanName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
+    const videoPath = `${cleanCode}/proof/${Date.now()}_${cleanName}`;
+
+    try {
+      const supabase = createClient();
+      const { error: videoUploadError } = await supabase.storage
+        .from("deliverables")
+        .upload(videoPath, file, {
+          cacheControl: "3600",
+          upsert: true,
+          contentType: file.type || "video/mp4",
+        });
+
+      if (videoUploadError) {
+        console.error("Video upload error:", videoUploadError);
+        alert(`Failed to upload proof video: ${videoUploadError.message}`);
+        setUploadError(videoUploadError.message);
+        setIsUploading(false);
+        return;
+      }
+
+      const { data: videoUrlData } = supabase.storage
+        .from("deliverables")
+        .getPublicUrl(videoPath);
+
+      const videoUrl = videoUrlData.publicUrl;
+
+      let { error: dbError } = await supabase
+        .from("orders")
+        .update({
+          proof_video_url: videoUrl,
+          status: "proof_ready",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("order_code", cleanCode);
+
+      if (dbError) {
+        const res = await fetch("/api/admin/orders", {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            "x-admin-key": adminKey,
+          },
+          body: JSON.stringify({
+            order_code: cleanCode,
+            proof_video_url: videoUrl,
+            status: "proof_ready",
+          }),
+        });
+
+        if (res.ok) {
+          dbError = null;
+        }
+      }
+
+      if (dbError) {
+        console.error("Database update error:", dbError);
+        alert(`Video upload succeeded, but database sync failed: ${dbError.message}`);
+        setUploadError(dbError.message);
+        setIsUploading(false);
+        return;
+      }
+
+      alert("Proof video uploaded successfully!");
+      showToast(`Proof Video Live: #${cleanCode}`, "Student can now preview the fix execution.");
+      setIsUploading(false);
+      setIsModalOpen(false);
+      setActiveModalOrder(null);
+      setUploadType(null);
+      setSelectedFile(null);
+      fetchOrders();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Video upload failure";
+      alert(`Upload error: ${msg}`);
+      setUploadError(msg);
+      setIsUploading(false);
+    }
+  };
+
+  // Execute Upload in Modal
+  const handleUploadSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedFile || !activeModalOrder || !uploadType) {
+      alert("Please select a file to upload.");
+      return;
+    }
+
+    if (uploadType === "fixed_zip") {
+      await handleReuploadSolution(activeModalOrder.order_code, selectedFile);
+      return;
+    }
+
+    if (uploadType === "video") {
+      await handleUploadProofVideo(activeModalOrder.order_code, selectedFile);
+      return;
     }
   };
 
@@ -633,6 +687,20 @@ function AdminDashboardContent() {
     completed: orders.filter((o) => o.status === "completed").length,
     pending_utr: orders.filter((o) => o.payment_status === "verifying").length,
   };
+
+  // --------------------------------------------------------------------------
+  // 0. HYDRATION GUARD (Loading skeleton until client mount)
+  // --------------------------------------------------------------------------
+  if (!isMounted) {
+    return (
+      <div className="min-h-screen bg-[#09090b] flex items-center justify-center p-4">
+        <div className="text-center space-y-3">
+          <div className="w-10 h-10 border-2 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-xs text-zinc-400 font-mono">Mounting admin telemetry portal...</p>
+        </div>
+      </div>
+    );
+  }
 
   // --------------------------------------------------------------------------
   // 1. LOGIN GATE SCREEN (If not authenticated)
@@ -1105,8 +1173,8 @@ function AdminDashboardContent() {
 
       </div>
 
-      {/* UPLOAD MODAL FOR PROOF VIDEO & FIXED ZIP */}
-      {activeModalOrder && uploadType && (
+      {/* UPLOAD / REUPLOAD MODAL FOR PROOF VIDEO & FIXED ZIP */}
+      {isModalOpen && activeModalOrder && uploadType && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
           <div 
             className="w-full max-w-lg p-6 rounded-3xl bg-[#18181b] border border-[#27272a] shadow-2xl relative glow-orange-border text-left"
@@ -1120,7 +1188,11 @@ function AdminDashboardContent() {
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-white">
-                    {uploadType === "video" ? "Upload Verified Proof Video" : "Upload Fixed Solution (Deliverables Bucket)"}
+                    {uploadType === "video" 
+                      ? "Upload Verified Proof Video" 
+                      : (activeModalOrder.deliverable_url || activeModalOrder.fixed_zip_url 
+                          ? "Reupload Fixed Solution (Deliverables Bucket)" 
+                          : "Upload Fixed Solution (Deliverables Bucket)")}
                   </h3>
                   <p className="text-xs text-zinc-400 font-mono">
                     Order Reference: #{activeModalOrder.order_code} • Bucket: deliverables
@@ -1129,6 +1201,7 @@ function AdminDashboardContent() {
               </div>
               <button
                 onClick={() => {
+                  setIsModalOpen(false);
                   setActiveModalOrder(null);
                   setUploadType(null);
                   setSelectedFile(null);
@@ -1180,9 +1253,11 @@ function AdminDashboardContent() {
                 <button
                   type="button"
                   onClick={() => {
+                    setIsModalOpen(false);
                     setActiveModalOrder(null);
                     setUploadType(null);
                     setSelectedFile(null);
+                    setUploadError(null);
                   }}
                   className="px-4 py-2.5 rounded-xl bg-[#09090b] hover:bg-zinc-800 text-zinc-300 text-xs font-semibold border border-[#27272a] transition-colors cursor-pointer"
                 >
@@ -1197,12 +1272,12 @@ function AdminDashboardContent() {
                   {isUploading ? (
                     <>
                       <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      <span>Uploading to Deliverables Bucket...</span>
+                      <span>{uploadType === "video" ? "Uploading Video..." : "Uploading to Deliverables Bucket..."}</span>
                     </>
                   ) : (
                     <>
                       <Upload className="w-3.5 h-3.5" />
-                      <span>Confirm &amp; Publish Deliverable</span>
+                      <span>{uploadType === "video" ? "Confirm & Publish Video" : "Confirm Reupload"}</span>
                     </>
                   )}
                 </button>
