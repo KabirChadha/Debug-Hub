@@ -868,7 +868,7 @@ function OrderDetailsContent() {
 
         </div>
 
-        {/* Emergency WhatsApp / Telegram Support Card */}
+        {/* Emergency WhatsApp Support Card */}
         <div className="p-6 rounded-2xl bg-[#18181b] border border-[#27272a] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
             <h4 className="text-sm font-bold text-white flex items-center gap-2">
@@ -879,23 +879,14 @@ function OrderDetailsContent() {
               Reach out to our engineering team quoting order <strong className="text-white font-mono">{orderCode}</strong> for express support.
             </p>
           </div>
-          <div className="flex items-center gap-2.5">
+          <div className="w-full sm:w-auto flex items-center">
             <a
               href={`https://wa.me/919289942337?text=Hi%2C%20regarding%20my%20CampusCodeFix%20order%20${orderCode}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-all shadow-[0_0_15px_rgba(16,185,129,0.3)] flex items-center gap-1.5 cursor-pointer"
+              className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-all shadow-[0_0_15px_rgba(16,185,129,0.3)] hover:shadow-[0_0_20px_rgba(16,185,129,0.5)] flex items-center justify-center gap-2 cursor-pointer"
             >
               <span>WhatsApp Support</span>
-              <ExternalLink className="w-3.5 h-3.5" />
-            </a>
-            <a
-              href="https://t.me"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-4 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold transition-all shadow-[0_0_15px_rgba(249,115,22,0.3)] flex items-center gap-1.5 cursor-pointer"
-            >
-              <span>Telegram Support</span>
               <ExternalLink className="w-3.5 h-3.5" />
             </a>
           </div>
