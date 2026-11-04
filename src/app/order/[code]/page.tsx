@@ -33,7 +33,7 @@ const STEPS = [
   { id: "step-1", title: "Received & Queued", desc: "Sandbox mounted & sanitized" },
   { id: "step-2", title: "Under Active Debugging", desc: "Senior engineer on shift" },
   { id: "step-3", title: "Run Verified & Proof Ready", desc: "Video proof & viva sheet ready" },
-  { id: "step-4", title: "Completed & Download Available", desc: "Deliverables unlocked" },
+  { id: "step-4", title: "Final Handover & Sandbox Sanitization", desc: "Deliverables unlocked" },
 ];
 
 const UPI_ID = "chadhakabir77@okaxis";
@@ -247,70 +247,74 @@ function OrderDetailsContent() {
     }
   };
 
-  // Deliverable Download Handler
+  const deliverableUrl =
+    (order as Record<string, unknown>)?.deliverable_url as string ||
+    order?.fixed_zip_url ||
+    `/api/deliverables?code=${orderCode}&type=project`;
+
+  // Deliverable Download Handler (Forces file download via Blob / URL)
   const handleDownloadDeliverable = async () => {
     setIsDownloadingDeliverable(true);
     try {
-      const explicitUrl =
-        (order as Record<string, unknown>)?.deliverable_url as string ||
-        order?.fixed_zip_url;
+      const ext = order?.file_name ? order.file_name.split(".").pop() : "zip";
+      const deliverableFileName = order?.file_name ? `solution-${orderCode}.${ext}` : `solution-${orderCode}.zip`;
 
-      // 1. Direct absolute URL (e.g. Supabase Storage publicUrl or external URL)
-      if (explicitUrl && (explicitUrl.startsWith("http://") || explicitUrl.startsWith("https://"))) {
-        window.open(explicitUrl, "_blank");
+      // 1. Fetch file as blob to force browser download dialog
+      const res = await fetch(deliverableUrl);
+      if (res.ok) {
+        const blob = await res.blob();
+        const blobUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = blobUrl;
+        a.download = deliverableFileName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(blobUrl);
         return;
       }
 
-      // 2. Query Supabase Storage from 'deliverables' bucket
-      const supabase = createClient();
-      let storagePath = explicitUrl;
-      if (!storagePath) {
-        try {
-          const { data: listFiles } = await supabase.storage.from("deliverables").list(orderCode);
-          if (listFiles && listFiles.length > 0) {
-            storagePath = `${orderCode}/${listFiles[0].name}`;
-          } else {
-            storagePath = `${orderCode}/fixed-project.zip`;
-          }
-        } catch {
-          storagePath = `${orderCode}/fixed-project.zip`;
-        }
-      }
-
-      const { data: signedData, error: signedError } = await supabase.storage
-        .from("deliverables")
-        .createSignedUrl(storagePath, 3600);
-
-      if (!signedError && signedData?.signedUrl) {
-        window.open(signedData.signedUrl, "_blank");
-        return;
-      }
-
-      // 3. Fallback to server route which has service role access to deliverables
-      window.open(`/api/deliverables?code=${encodeURIComponent(orderCode)}&type=project`, "_blank");
+      // 2. Direct anchor fallback
+      const a = document.createElement("a");
+      a.href = deliverableUrl;
+      a.download = deliverableFileName;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
     } catch (err: unknown) {
-      console.warn("Deliverable download error:", err);
-      window.open(`/api/deliverables?code=${encodeURIComponent(orderCode)}&type=project`, "_blank");
+      console.warn("Blob download fallback:", err);
+      const a = document.createElement("a");
+      a.href = deliverableUrl;
+      a.download = `solution-${orderCode}.zip`;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
     } finally {
       setIsDownloadingDeliverable(false);
     }
   };
 
-  // Strict Payment Verification & Unlocking Logic derived directly from order
-  const isPaymentApproved = 
+  // 1. Normalized status checks: isPaidOrCompleted
+  const isPaidOrCompleted = 
     order?.payment_status?.toLowerCase() === "approved" ||
-    order?.payment_status?.toLowerCase() === "completed" ||
     order?.status?.toLowerCase() === "completed" ||
+    order?.payment_status?.toLowerCase() === "completed" ||
     order?.is_paid === true;
 
   const isUtrPending = 
-    order?.payment_status === "pending_verification" || 
-    order?.payment_status === "verifying" ||
-    Boolean(order?.utr_number && !isPaymentApproved);
+    !isPaidOrCompleted && (
+      order?.payment_status === "pending_verification" || 
+      order?.payment_status === "verifying" ||
+      Boolean(order?.utr_number)
+    );
 
   // Stepper state progression
   const getStepProgressIndex = () => {
-    if (isPaymentApproved) {
+    if (isPaidOrCompleted) {
       return 3;
     }
     switch (order?.status) {
@@ -475,12 +479,14 @@ function OrderDetailsContent() {
               <span className="text-zinc-500 block mb-1">Rate &amp; SLA</span>
               <span className="text-orange-400 font-medium">Flat ₹400 • 1–2 Hr</span>
             </div>
+            
+            {/* Status Badge: Displayed as 'Status: Completed / Delivered' when isPaidOrCompleted */}
             <div className="p-3.5 rounded-xl bg-[#09090b] border border-[#27272a] col-span-2 sm:col-span-1">
-              <span className="text-zinc-500 block mb-1">Payment Status</span>
-              {isPaymentApproved ? (
+              <span className="text-zinc-500 block mb-1">Status</span>
+              {isPaidOrCompleted ? (
                 <span className="text-emerald-400 font-bold flex items-center gap-1">
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Approved</span>
+                  <span>Status: Completed / Delivered</span>
                 </span>
               ) : isUtrPending ? (
                 <span className="text-amber-400 font-bold flex items-center gap-1 animate-pulse">
@@ -495,35 +501,35 @@ function OrderDetailsContent() {
             </div>
           </div>
 
-          {/* Engineering Progression Stepper */}
+          {/* Engineering Progression Stepper: All 4 milestones checked when isPaidOrCompleted */}
           <div className="mt-8 pt-8 border-t border-[#27272a]">
             <h2 className="text-xs font-mono uppercase tracking-wider text-orange-400 font-bold mb-6">
-              Engineering Progression Stepper
+              Execution Milestones
             </h2>
 
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 sm:gap-2 relative">
               {STEPS.map((step, idx) => {
-                const isCompleted = activeIndex > idx;
-                const isActive = activeIndex === idx;
+                const isCompleted = isPaidOrCompleted || activeIndex > idx;
+                const isActive = !isPaidOrCompleted && activeIndex === idx;
 
                 return (
                   <div
                     key={step.id}
                     className={`relative flex flex-col p-4 rounded-2xl border transition-all duration-300 ${
-                      isActive
+                      isCompleted
+                        ? "bg-[#09090b] border-emerald-500/40 text-zinc-300 shadow-[0_0_15px_rgba(16,185,129,0.15)]"
+                        : isActive
                         ? "bg-orange-500/10 border-orange-500 shadow-[0_0_25px_rgba(249,115,22,0.25)] scale-[1.02]"
-                        : isCompleted
-                        ? "bg-[#09090b] border-emerald-500/40 text-zinc-300"
                         : "bg-[#09090b] border-[#27272a] text-zinc-600 opacity-60"
                     }`}
                   >
                     <div className="flex items-center justify-between mb-3">
                       <div
                         className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs transition-colors ${
-                          isActive
-                            ? "bg-orange-500 text-white shadow-[0_0_15px_rgba(249,115,22,0.5)] animate-pulse"
-                            : isCompleted
+                          isCompleted
                             ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
+                            : isActive
+                            ? "bg-orange-500 text-white shadow-[0_0_15px_rgba(249,115,22,0.5)] animate-pulse"
                             : "bg-[#18181b] text-zinc-500 border border-[#27272a]"
                         }`}
                       >
@@ -544,17 +550,17 @@ function OrderDetailsContent() {
 
                     <h4
                       className={`text-xs font-bold leading-tight ${
-                        isActive
-                          ? "text-orange-400"
-                          : isCompleted
+                        isCompleted
                           ? "text-white"
+                          : isActive
+                          ? "text-orange-400"
                           : "text-zinc-500"
                       }`}
                     >
                       {step.title}
                     </h4>
                     <p className="text-[11px] text-zinc-400 mt-1 leading-snug">
-                      {step.desc}
+                      {isCompleted && idx === 3 ? "Handover complete & verified" : step.desc}
                     </p>
                   </div>
                 );
@@ -566,7 +572,7 @@ function OrderDetailsContent() {
           <div className="mt-8 pt-6 border-t border-[#27272a]">
             
             {/* Active Sandbox Terminal: Displayed during triage if not yet approved */}
-            {!isPaymentApproved && (order.status === "submitted" || order.status === "in_progress" || !order.status) && (
+            {!isPaidOrCompleted && (order.status === "submitted" || order.status === "in_progress" || !order.status) && (
               <div className="space-y-4 animate-in fade-in duration-300 mb-8">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -637,13 +643,13 @@ function OrderDetailsContent() {
             )}
 
             {/* Proof Video Section */}
-            {(isPaymentApproved || order.status === "proof_ready" || order.status === "completed" || Boolean(order.proof_video_url)) && (
+            {(isPaidOrCompleted || order.status === "proof_ready" || order.status === "completed" || Boolean(order.proof_video_url)) && (
               <div className="mb-8">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
                     <Video className="w-5 h-5 text-emerald-400" />
                     <h3 className="text-base font-bold text-white">
-                      {isPaymentApproved ? "Archived Verification Proof" : "Run Verified! Watch Execution Proof"}
+                      {isPaidOrCompleted ? "Archived Verification Proof" : "Run Verified! Watch Execution Proof"}
                     </h3>
                   </div>
                   <span className="text-xs font-mono text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/30">
@@ -672,8 +678,8 @@ function OrderDetailsContent() {
             )}
 
             {/* STRICT RENDERING BY STATUS: Unlocked Deliverables vs Under Verification vs Unpaid */}
-            {isPaymentApproved ? (
-              /* 1. UNLOCKED DELIVERABLES: Hide UTR form completely and show download buttons */
+            {isPaidOrCompleted ? (
+              /* 1. UNLOCKED DELIVERABLES: Hide all UPI cards & UTR input fields completely */
               <div className="space-y-6 animate-in fade-in duration-300">
                 <div className="p-6 rounded-2xl bg-emerald-950/20 border border-emerald-500/40 text-left space-y-2">
                   <div className="flex items-center gap-2 text-emerald-400 font-bold text-base sm:text-lg">
@@ -687,30 +693,35 @@ function OrderDetailsContent() {
 
                 {/* Primary Download Buttons */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {/* Download Button 1: Download Fixed Source Code */}
-                  <button
-                    type="button"
-                    onClick={handleDownloadDeliverable}
-                    disabled={isDownloadingDeliverable}
-                    className="p-5 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold transition-all duration-200 shadow-[0_0_30px_rgba(249,115,22,0.4)] hover:shadow-[0_0_40px_rgba(249,115,22,0.6)] flex flex-col justify-between group cursor-pointer border border-orange-400 text-left disabled:opacity-60"
+                  {/* Download Button 1: Download Fixed Archive */}
+                  <a
+                    href={deliverableUrl}
+                    download={`solution-${orderCode}.zip`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      handleDownloadDeliverable();
+                    }}
+                    className="p-5 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold transition-all duration-200 shadow-[0_0_30px_rgba(249,115,22,0.4)] hover:shadow-[0_0_40px_rgba(249,115,22,0.6)] flex flex-col justify-between group cursor-pointer border border-orange-400 text-left"
                   >
                     <div className="flex items-center justify-between mb-4">
                       <div className="w-10 h-10 rounded-xl bg-black/20 flex items-center justify-center">
                         <Download className={`w-5 h-5 group-hover:translate-y-0.5 transition-transform ${isDownloadingDeliverable ? "animate-bounce" : ""}`} />
                       </div>
                       <span className="text-[10px] font-mono uppercase font-bold bg-black/30 px-2 py-0.5 rounded">
-                        .ZIP ARCHIVE
+                        DOWNLOAD READY
                       </span>
                     </div>
                     <div>
                       <h4 className="text-base font-extrabold text-white">
-                        {isDownloadingDeliverable ? "Opening Deliverable..." : "Download Fixed Source Code"}
+                        {isDownloadingDeliverable ? "Downloading Fixed Archive..." : "Download Fixed Archive"}
                       </h4>
                       <p className="text-xs text-orange-100/90 mt-1">
                         Clean code with fixed dependencies &amp; run script.
                       </p>
                     </div>
-                  </button>
+                  </a>
 
                   {/* Download Button 2: Download Viva Defense Sheet */}
                   <div className="flex flex-col gap-2">

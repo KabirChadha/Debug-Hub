@@ -110,7 +110,13 @@ export function OrderTrackerModal({
   // Derive current status stage
   const currentStatus: OrderStatus = liveOrder?.status || "in_progress";
 
+  const isPaidOrCompleted = 
+    liveOrder?.payment_status?.toLowerCase() === "approved" ||
+    liveOrder?.status?.toLowerCase() === "completed" ||
+    liveOrder?.is_paid === true;
+
   const getStepState = (stepIndex: number) => {
+    if (isPaidOrCompleted) return "done";
     const statusOrder: OrderStatus[] = ["submitted", "in_progress", "proof_ready", "completed"];
     const currentIndex = statusOrder.indexOf(currentStatus);
     if (currentIndex > stepIndex) return "done";
@@ -188,8 +194,8 @@ export function OrderTrackerModal({
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
-              <span className="text-emerald-400 font-medium capitalize">
-                Status: {currentStatus.replace("_", " ")}
+              <span className="text-emerald-400 font-medium">
+                {isPaidOrCompleted ? "Status: Completed / Delivered" : `Status: ${currentStatus.replace("_", " ")}`}
               </span>
             </div>
           </div>
