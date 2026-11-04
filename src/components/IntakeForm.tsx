@@ -400,7 +400,7 @@ export function IntakeForm() {
               Submit Broken Code for 1–2 Hr Triage
             </h3>
             <p className="text-xs sm:text-sm text-[#a1a1aa] mt-1">
-              Flat rate <strong className="text-orange-400">₹400</strong> • Guaranteed run or ₹0 charge. Includes 1-page Viva Defense Sheet.
+              Flat rate <strong className="text-orange-400">₹400</strong> • Guaranteed run or ₹0 charge. Includes verified proof recording.
             </p>
           </div>
 

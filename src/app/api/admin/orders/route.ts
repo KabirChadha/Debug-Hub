@@ -94,9 +94,9 @@ export async function GET(request: NextRequest) {
           {
             id: "demo-order-4",
             order_code: "FIX-9281",
-            contact_handle: "@rahul_viva",
+            contact_handle: "@rahul_dev",
             tech_stack: "React/Next.js",
-            issue_description: "Viva defense requirements draft and repository architecture notes.",
+            issue_description: "Build failure in Next.js app router and repository architecture configuration.",
             status: "completed",
             file_name: "capstone_synopsis.docx",
             file_storage_path: "raw/FIX-9281/capstone_synopsis.docx",

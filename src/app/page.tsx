@@ -15,7 +15,7 @@ export default function Home() {
       {/* 2. Hero: Review & Capstone Code Debugging — Guaranteed Run or ₹0 Charge */}
       <Hero />
 
-      {/* 3. Key Benefits Banner: 1-2 Hour Turnaround, Anonymous & Encrypted, Includes 1-Page Viva Defense Sheet */}
+      {/* 3. Key Benefits Banner: 1-2 Hour Turnaround, Anonymous & Encrypted, Run Verification & Proof Video */}
       <BenefitsBanner />
 
       {/* 4. Supported Tech Stacks & Frameworks */}

@@ -18,21 +18,18 @@ import {
   Cpu,
   Lock,
   QrCode,
-  FileCode2,
-  Sparkles,
   Clock,
   Send,
   AlertCircle
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Toast } from "@/components/Toast";
-import { VivaPreviewModal } from "@/components/VivaPreviewModal";
 import type { Order } from "@/types/database.types";
 
 const STEPS = [
   { id: "step-1", title: "Received & Queued", desc: "Sandbox mounted & sanitized" },
   { id: "step-2", title: "Under Active Debugging", desc: "Senior engineer on shift" },
-  { id: "step-3", title: "Run Verified & Proof Ready", desc: "Video proof & viva sheet ready" },
+  { id: "step-3", title: "Proof Video Recorded & Execution Verified", desc: "Video proof & execution verified" },
   { id: "step-4", title: "Final Handover & Sandbox Sanitization", desc: "Deliverables unlocked" },
 ];
 
@@ -90,7 +87,6 @@ function OrderDetailsContent() {
   // UTR Payment States
   const [utrInput, setUtrInput] = useState("");
   const [isSubmittingUtr, setIsSubmittingUtr] = useState(false);
-  const [isVivaModalOpen, setIsVivaModalOpen] = useState(false);
 
   // Fetch / refresh order row from Supabase
   const fetchOrder = useCallback(async () => {
@@ -379,11 +375,6 @@ function OrderDetailsContent() {
         message={`Tracking Code ${orderCode} Copied!`}
         submessage="Your tracking code was copied to clipboard. Bookmark this page to check progress anytime."
         onClose={() => setToastVisible(false)}
-      />
-
-      <VivaPreviewModal
-        isOpen={isVivaModalOpen}
-        onClose={() => setIsVivaModalOpen(false)}
       />
 
       <div className="max-w-4xl mx-auto space-y-8">
@@ -687,13 +678,12 @@ function OrderDetailsContent() {
                     <span>Payment Verified! Your Repaired Project is Ready</span>
                   </div>
                   <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed font-sans">
-                    Your repository has been tested with 0 compilation errors and containerized cleanly. The fixed archive and your oral viva preparation dossier are unlocked and ready for download.
+                    Your repository has been tested with 0 compilation errors and containerized cleanly. Your complete fixed code package is unlocked and ready for download.
                   </p>
                 </div>
 
-                {/* Primary Download Buttons */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {/* Download Button 1: Download Fixed Archive */}
+                {/* Primary Download Button: Clean Full-Width Action Card */}
+                <div className="w-full">
                   <a
                     href={deliverableUrl}
                     download={`solution-${orderCode}.zip`}
@@ -703,60 +693,34 @@ function OrderDetailsContent() {
                       e.preventDefault();
                       handleDownloadDeliverable();
                     }}
-                    className="p-5 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold transition-all duration-200 shadow-[0_0_30px_rgba(249,115,22,0.4)] hover:shadow-[0_0_40px_rgba(249,115,22,0.6)] flex flex-col justify-between group cursor-pointer border border-orange-400 text-left"
+                    className="w-full p-6 sm:p-7 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold transition-all duration-200 shadow-[0_0_35px_rgba(249,115,22,0.45)] hover:shadow-[0_0_45px_rgba(249,115,22,0.65)] flex flex-col sm:flex-row sm:items-center justify-between gap-4 group cursor-pointer border border-orange-400 text-left"
                   >
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="w-10 h-10 rounded-xl bg-black/20 flex items-center justify-center">
-                        <Download className={`w-5 h-5 group-hover:translate-y-0.5 transition-transform ${isDownloadingDeliverable ? "animate-bounce" : ""}`} />
-                      </div>
-                      <span className="text-[10px] font-mono uppercase font-bold bg-black/30 px-2 py-0.5 rounded">
-                        DOWNLOAD READY
-                      </span>
-                    </div>
-                    <div>
-                      <h4 className="text-base font-extrabold text-white">
-                        {isDownloadingDeliverable ? "Downloading Fixed Archive..." : "Download Fixed Archive"}
-                      </h4>
-                      <p className="text-xs text-orange-100/90 mt-1">
-                        Clean code with fixed dependencies &amp; run script.
-                      </p>
-                    </div>
-                  </a>
-
-                  {/* Download Button 2: Download Viva Defense Sheet */}
-                  <div className="flex flex-col gap-2">
-                    <a
-                      href={`/api/deliverables?code=${orderCode}&type=viva`}
-                      download={`viva-defense-${orderCode}.md`}
-                      className="p-5 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold transition-all duration-200 shadow-[0_0_30px_rgba(249,115,22,0.4)] hover:shadow-[0_0_40px_rgba(249,115,22,0.6)] flex flex-col justify-between group cursor-pointer border border-orange-400"
-                    >
-                      <div className="flex items-center justify-between mb-4">
-                        <div className="w-10 h-10 rounded-xl bg-black/20 flex items-center justify-center">
-                          <FileCode2 className="w-5 h-5 group-hover:translate-y-0.5 transition-transform" />
-                        </div>
-                        <span className="text-[10px] font-mono uppercase font-bold bg-black/30 px-2 py-0.5 rounded">
-                          .PDF / .MD
-                        </span>
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-xl bg-black/20 flex items-center justify-center flex-shrink-0">
+                        <Download className={`w-6 h-6 group-hover:translate-y-0.5 transition-transform ${isDownloadingDeliverable ? "animate-bounce" : ""}`} />
                       </div>
                       <div>
-                        <h4 className="text-base font-extrabold text-white">
-                          Download Viva Defense Sheet (.pdf/.md)
-                        </h4>
-                        <p className="text-xs text-orange-100/90 mt-1">
-                          60s architecture pitch + top 5 oral questions &amp; answers.
+                        <div className="flex items-center gap-2 mb-1">
+                          <h4 className="text-lg sm:text-xl font-extrabold text-white">
+                            {isDownloadingDeliverable ? "Downloading Fixed Archive..." : "Download Fixed Archive"}
+                          </h4>
+                          <span className="text-[10px] font-mono uppercase font-bold bg-black/30 px-2.5 py-0.5 rounded">
+                            PACKAGE READY
+                          </span>
+                        </div>
+                        <p className="text-xs sm:text-sm text-orange-100/90">
+                          Complete clean repository with fixed dependencies, resolved configurations &amp; run script.
                         </p>
                       </div>
-                    </a>
+                    </div>
 
-                    <button
-                      type="button"
-                      onClick={() => setIsVivaModalOpen(true)}
-                      className="w-full py-2.5 px-4 rounded-xl bg-[#18181b] hover:bg-zinc-800 text-orange-400 hover:text-orange-300 border border-orange-500/30 text-xs font-mono font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                    >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>Preview Viva Sheet in Browser (Instant)</span>
-                    </button>
-                  </div>
+                    <div className="sm:self-center flex-shrink-0">
+                      <span className="px-4 py-2.5 rounded-xl bg-black/25 group-hover:bg-black/35 text-white text-xs font-mono font-bold flex items-center gap-1.5 transition-colors">
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Download (.zip)</span>
+                      </span>
+                    </div>
+                  </a>
                 </div>
 
                 <div className="p-4 rounded-xl bg-[#09090b] border border-[#27272a] flex items-center justify-between text-xs text-zinc-400">
@@ -807,7 +771,7 @@ function OrderDetailsContent() {
                       Flat Rate • ₹400 • No Run = ₹0 Charged
                     </h3>
                     <p className="text-xs sm:text-sm text-zinc-400 mt-1">
-                      Your project is completely fixed and verified. Please complete payment of ₹400 to unlock deliverables.
+                      Your project is completely fixed and verified. Please complete payment of ₹400 to unlock your complete fixed code package.
                     </p>
                   </div>
                 </div>

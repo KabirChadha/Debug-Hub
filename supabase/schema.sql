@@ -173,7 +173,7 @@ values
     'deliverables',
     false, -- Private: accessed via signed URLs or admin credentials
     524288000, -- 500 MB max file size for deliverables & demo videos
-    null -- Allows archives, videos, markdown defense sheets, and source deliverables
+    null -- Allows archives, videos, documents, and source deliverables
   )
 on conflict (id) do update set
   public = excluded.public,
@@ -204,7 +204,7 @@ create policy "Admin read project-intakes"
   );
 
 -- 3. Storage RLS Policies for 'deliverables'
--- Admin / service role can upload fixed zips, viva sheets, and proof videos
+-- Admin / service role can upload fixed solution archives and proof videos
 drop policy if exists "Admin upload deliverables" on storage.objects;
 create policy "Admin upload deliverables"
   on storage.objects

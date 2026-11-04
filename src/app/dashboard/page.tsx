@@ -168,7 +168,7 @@ export default function DashboardPage() {
                   </span>
                 </div>
                 <h1 className="text-2xl sm:text-3xl font-extrabold text-white mt-1">
-                  My Orders &amp; Viva Handover
+                  My Orders &amp; Deliverables
                 </h1>
                 <p className="text-xs sm:text-sm text-zinc-400 mt-1">
                   Connected as <span className="font-mono text-zinc-200">{user.email}</span>

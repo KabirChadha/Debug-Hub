@@ -48,7 +48,7 @@ export function InteractiveDebugDemo() {
                 : "text-zinc-400 hover:text-white"
             }`}
           >
-            ⚡ Fixed + Viva Sheet
+            ⚡ Fixed + Verified
           </button>
         </div>
       </div>
@@ -96,13 +96,13 @@ export function InteractiveDebugDemo() {
               [⚡] Ready on http://localhost:3000 (Docker Container Status: Healthy)
             </p>
 
-            <div className="p-3 mt-3 rounded-xl bg-orange-500/10 border border-orange-500/30 text-xs flex items-center justify-between">
+            <div className="p-3 mt-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-orange-400" />
-                <span className="text-white font-medium">1-Page Viva Defense Sheet Compiled &amp; Attached</span>
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                <span className="text-white font-medium">Execution Verified &amp; Clean Source Delivered</span>
               </div>
-              <span className="text-[10px] font-mono text-orange-400 bg-orange-500/20 px-2 py-0.5 rounded border border-orange-500/30">
-                PDF Ready
+              <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/20 px-2 py-0.5 rounded border border-emerald-500/30">
+                0 Errors
               </span>
             </div>
           </div>

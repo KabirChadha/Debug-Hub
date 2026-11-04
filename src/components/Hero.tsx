@@ -5,14 +5,12 @@ import {
   ArrowRight, 
   ShieldCheck, 
   CheckCircle2, 
-  FileSpreadsheet
+  Search
 } from "lucide-react";
 import { InteractiveDebugDemo } from "./InteractiveDebugDemo";
-import { VivaPreviewModal } from "./VivaPreviewModal";
 import { OrderTrackerModal } from "./OrderTrackerModal";
 
 export function Hero() {
-  const [isVivaModalOpen, setIsVivaModalOpen] = useState(false);
   const [isTrackerModalOpen, setIsTrackerModalOpen] = useState(false);
 
   return (
@@ -49,8 +47,8 @@ export function Hero() {
 
               {/* Muted Zinc Body */}
               <p className="text-base sm:text-lg text-[#a1a1aa] leading-relaxed max-w-2xl">
-                Don&apos;t risk your grade on runtime crashes, broken migrations, Docker container failures, or compilation errors right before viva defense. 
-                Our vetted senior software engineers fix your repository in <strong className="text-white font-semibold">1–2 hours</strong> and equip you with a <strong className="text-orange-400 font-semibold">1-Page Viva Defense Sheet</strong> so you explain every single line with authority.
+                Don&apos;t risk your grade on runtime crashes, broken migrations, Docker container failures, or compilation errors right before project evaluation. 
+                Our vetted senior software engineers fix your repository in <strong className="text-white font-semibold">1–2 hours</strong> with verified run execution, clean code archives, and direct zero-error proof recordings.
               </p>
 
               {/* Key Bullet Highlights */}
@@ -77,7 +75,7 @@ export function Hero() {
                   <div className="w-5 h-5 rounded-full bg-orange-500/20 text-orange-400 flex items-center justify-center flex-shrink-0 border border-orange-500/30">
                     <CheckCircle2 className="w-3.5 h-3.5" />
                   </div>
-                  <span><strong>Defense Dossier:</strong> Model answers to oral questions</span>
+                  <span><strong>Verified Proof:</strong> Screen recording of zero-error run</span>
                 </div>
               </div>
 
@@ -93,11 +91,11 @@ export function Hero() {
 
                 <button
                   type="button"
-                  onClick={() => setIsVivaModalOpen(true)}
+                  onClick={() => setIsTrackerModalOpen(true)}
                   className="px-6 py-4 rounded-xl text-sm font-semibold bg-[#18181b] hover:bg-[#27272a] text-zinc-200 border border-[#27272a] hover:border-orange-500/50 hover:ring-2 hover:ring-orange-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
                 >
-                  <FileSpreadsheet className="w-4 h-4 text-orange-400" />
-                  <span>View Sample Viva Sheet</span>
+                  <Search className="w-4 h-4 text-orange-400" />
+                  <span>Track Live Ticket</span>
                 </button>
               </div>
 
@@ -129,12 +127,6 @@ export function Hero() {
           </div>
         </div>
       </section>
-
-      {/* Viva Preview Modal */}
-      <VivaPreviewModal
-        isOpen={isVivaModalOpen}
-        onClose={() => setIsVivaModalOpen(false)}
-      />
 
       {/* Tracker Modal */}
       <OrderTrackerModal

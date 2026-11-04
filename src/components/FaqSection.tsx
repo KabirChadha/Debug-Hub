@@ -16,8 +16,8 @@ export function FaqSection() {
       a: "When you select emergency rush, your ticket bypasses the queue and is immediately picked up by an active senior engineer on shift. Most compiler failures, dependency incompatibilities, and async crashes are diagnosed and patched within 45 to 90 minutes.",
     },
     {
-      q: "What is included in the 1-Page Viva Defense Sheet?",
-      a: "The Viva Defense Sheet is a tailored PDF/Markdown document summarizing: (1) 60-second architecture pitch, (2) Root cause of the bug and how it was fixed, (3) Algorithmic complexities and database schemas, and (4) Top 5 anticipated oral questions external examiners usually ask, with exact model answers.",
+      q: "What is included with my delivered project?",
+      a: "Every debugged project includes: (1) Clean, fixed source code archive with all dependencies resolved, (2) HD verification screen recording demonstrating successful build, startup, and zero-error execution, and (3) Exact setup and run instructions to reproduce the clean run on your machine.",
     },
     {
       q: "Is my college identity, professor name, or source code protected?",
@@ -42,7 +42,7 @@ export function FaqSection() {
             Frequently Asked Questions
           </h2>
           <p className="mt-2 text-sm text-[#a1a1aa]">
-            Everything you need to know about our capstone debugging &amp; viva support service.
+            Everything you need to know about our emergency capstone debugging &amp; verification service.
           </p>
         </div>
 

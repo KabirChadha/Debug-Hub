@@ -19,7 +19,7 @@ export function Footer() {
                 campus<span className="text-orange-500">.fix</span>
               </span>
               <p className="text-[11px] text-zinc-500">
-                Guaranteed Capstone Debugging &amp; Viva Defense Engineering
+                Guaranteed Capstone Debugging &amp; Rapid Code Repair
               </p>
             </div>
           </div>

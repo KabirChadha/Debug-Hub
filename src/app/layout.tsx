@@ -15,11 +15,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "CampusCodeFix — Review & Capstone Code Debugging | Guaranteed Run or ₹0 Charge",
   description:
-    "Fast 1-2 hour turnaround emergency code debugging for engineering capstones, lab exams, and semester project submissions. 100% anonymous, encrypted, and includes a 1-page Viva Defense Sheet.",
+    "Fast 1-2 hour turnaround emergency code debugging for engineering capstones, lab exams, and semester project submissions. 100% anonymous, encrypted, with execution proof and guaranteed run.",
   keywords: [
     "capstone code debugging",
     "engineering project debug",
-    "viva defense sheet",
+    "verified code execution",
     "student code fix",
     "Next.js debug",
     "Python debugging service",

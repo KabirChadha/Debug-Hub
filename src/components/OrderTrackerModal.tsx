@@ -328,14 +328,14 @@ export function OrderTrackerModal({
               <div className="flex-1">
                 <div className="flex items-center justify-between text-xs">
                   <span className={`font-medium ${getStepState(2) === "active" ? "text-orange-400" : "text-zinc-200"}`}>
-                    Proof Video Recorded &amp; 1-Page Viva Defense Sheet Compiled
+                    Proof Video Recorded &amp; Execution Verified
                   </span>
                   <span className="text-zinc-500">
                     {getStepState(2) === "active" ? "Ready for Review" : getStepState(2) === "done" ? "Passed" : "Queued"}
                   </span>
                 </div>
                 <p className="text-xs text-zinc-400 mt-0.5">
-                  Detailed breakdown of root causes, time complexities, and anticipated oral viva questions.
+                  Full execution test recording verified with zero runtime errors.
                 </p>
               </div>
             </div>
