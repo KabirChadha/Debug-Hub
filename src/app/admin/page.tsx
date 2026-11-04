@@ -257,37 +257,72 @@ function AdminDashboardContent() {
     setUploadError(null);
   };
 
-  // Action 4: Approve Payment (Sets payment_status='approved' and status='completed' to unlock downloads)
-  const handleApprovePayment = async (orderCode: string) => {
+  // Action 4: Approve Payment (Sets payment_status='approved', status='completed', is_paid=true)
+  const handleApprovePayment = async (orderId: string, orderCode: string) => {
     try {
-      const res = await fetch("/api/admin/orders", {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          "x-admin-key": adminKey,
-        },
-        body: JSON.stringify({
-          order_code: orderCode,
+      const supabase = createClient();
+      let updateError = null;
+
+      const { error: directError } = await supabase
+        .from("orders")
+        .update({
           payment_status: "approved",
           status: "completed",
-        }),
-      });
+          is_paid: true,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("order_code", orderCode);
 
-      if (res.ok) {
-        setOrders((prev) =>
-          prev.map((o) =>
-            o.order_code === orderCode
-              ? { ...o, payment_status: "approved", status: "completed" }
-              : o
-          )
-        );
-        showToast(
-          `Payment Approved: #${orderCode}`,
-          "Order marked completed and client downloads unlocked."
-        );
+      updateError = directError;
+
+      // If direct update failed (e.g. column updated_at missing or RLS), try serverless admin route
+      if (updateError) {
+        const res = await fetch("/api/admin/orders", {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            "x-admin-key": adminKey,
+          },
+          body: JSON.stringify({
+            order_code: orderCode,
+            payment_status: "approved",
+            status: "completed",
+            is_paid: true,
+          }),
+        });
+
+        if (res.ok) {
+          updateError = null;
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          updateError = new Error(errData.error || "Failed to update payment status via serverless API");
+        }
       }
-    } catch {
-      console.warn("Failed to approve payment");
+
+      if (updateError) {
+        alert("Failed to update payment status: " + (updateError as Error).message);
+        return;
+      }
+
+      // Optimistic local state update
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.order_code === orderCode
+            ? { ...o, payment_status: "approved", status: "completed", is_paid: true }
+            : o
+        )
+      );
+
+      showToast(
+        `Payment Approved: #${orderCode}`,
+        "Order marked completed and client downloads unlocked."
+      );
+
+      // Refresh local admin state
+      fetchOrders(adminKey);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to approve payment";
+      alert("Failed to update payment status: " + msg);
     }
   };
 
@@ -914,7 +949,7 @@ function AdminDashboardContent() {
                             {/* APPROVE PAYMENT BUTTON: sets payment_status='approved' & status='completed' */}
                             {order.payment_status !== "approved" && (
                               <button
-                                onClick={() => handleApprovePayment(order.order_code)}
+                                onClick={() => handleApprovePayment(order.id, order.order_code)}
                                 className="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-black border border-emerald-400 text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 whitespace-nowrap shadow-[0_0_12px_rgba(16,185,129,0.3)]"
                                 title="Approve payment and unlock client downloads"
                               >

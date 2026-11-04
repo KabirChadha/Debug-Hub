@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, Suspense } from "react";
+import React, { useEffect, useState, Suspense, useCallback } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { 
@@ -90,9 +90,19 @@ function OrderDetailsContent() {
   // UTR Payment States
   const [utrInput, setUtrInput] = useState("");
   const [isSubmittingUtr, setIsSubmittingUtr] = useState(false);
-  const [utrError, setUtrError] = useState<string | null>(null);
-  const [utrSuccessMsg, setUtrSuccessMsg] = useState<string | null>(null);
   const [isVivaModalOpen, setIsVivaModalOpen] = useState(false);
+
+  // Fetch / refresh order row from Supabase
+  const fetchOrder = useCallback(async () => {
+    const record = await getOrderRecord(orderCode);
+    if (record) {
+      setOrder(record);
+      if (record.utr_number) {
+        setUtrInput(record.utr_number);
+      }
+    }
+    return record;
+  }, [orderCode]);
 
   // 1. Source of truth from Supabase on mount
   useEffect(() => {
@@ -117,17 +127,35 @@ function OrderDetailsContent() {
     };
   }, [orderCode]);
 
-  // Fetch / refresh order row from Supabase
-  const fetchOrder = async () => {
-    const record = await getOrderRecord(orderCode);
-    if (record) {
-      setOrder(record);
-      if (record.utr_number) {
-        setUtrInput(record.utr_number);
-      }
-    }
-    return record;
-  };
+  // 2. Realtime subscription to order row changes
+  useEffect(() => {
+    if (!orderCode) return;
+    const supabase = createClient();
+
+    const channel = supabase
+      .channel(`order-realtime-${orderCode}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "orders",
+          filter: `order_code=eq.${orderCode}`,
+        },
+        (payload) => {
+          if (payload.new) {
+            setOrder(payload.new as Order);
+          } else {
+            fetchOrder();
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [orderCode, fetchOrder]);
 
   // Refresh handler
   const handleCheckStatus = async () => {
@@ -163,58 +191,57 @@ function OrderDetailsContent() {
   // UTR Payment Submission Handler
   const handleSubmitUtr = async (e: React.FormEvent) => {
     e.preventDefault();
-    setUtrError(null);
-    setUtrSuccessMsg(null);
-
-    const trimmed = utrInput.trim();
-    if (!trimmed) {
-      setUtrError("Please enter your 12-digit UPI UTR / Transaction ID.");
-      return;
-    }
-
-    if (trimmed.length < 8) {
-      setUtrError("Invalid Transaction ID length. UPI UTRs are typically 12 numeric digits.");
+    const utrValue = utrInput.trim();
+    if (!utrValue || utrValue.length < 6) {
+      alert("Please enter a valid UTR number.");
       return;
     }
 
     setIsSubmittingUtr(true);
-
     try {
-      const res = await fetch("/api/orders", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          order_code: orderCode,
-          utr_number: trimmed,
-          payment_status: "verifying",
-        }),
-      });
+      const supabase = createClient();
+      let submitError: string | null = null;
+      const { error } = await supabase
+        .from("orders")
+        .update({
+          utr_number: utrValue,
+          payment_status: "pending_verification",
+        })
+        .eq("order_code", orderCode);
 
-      if (!res.ok) {
-        throw new Error("Failed to submit UTR reference");
+      // Fallback to server route if direct client update hits RLS restrictions
+      if (error) {
+        submitError = error.message;
+        try {
+          const res = await fetch("/api/orders", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              order_code: orderCode,
+              utr_number: utrValue,
+              payment_status: "pending_verification",
+            }),
+          });
+
+          if (res.ok) {
+            submitError = null;
+          } else {
+            const errData = await res.json().catch(() => ({}));
+            submitError = errData.error || error.message;
+          }
+        } catch {
+          // retain submitError
+        }
       }
 
-      // Optimistically update order state with submitted UTR and verifying status
-      if (order) {
-        setOrder({
-          ...order,
-          utr_number: trimmed,
-          payment_status: "verifying",
-        });
+      if (submitError) {
+        alert("Failed to submit UTR: " + submitError);
       } else {
-        await fetchOrder();
+        await fetchOrder(); // re-fetch from database immediately
       }
-      setUtrSuccessMsg("UTR submitted successfully! Our verification engineer is matching your transaction.");
     } catch (err: unknown) {
-      console.warn("UTR submission fallback:", err);
-      if (order) {
-        setOrder({
-          ...order,
-          utr_number: trimmed,
-          payment_status: "verifying",
-        });
-      }
-      setUtrSuccessMsg("UTR submitted! Verifying status.");
+      const msg = err instanceof Error ? err.message : "Error submitting UTR";
+      alert("Failed to submit UTR: " + msg);
     } finally {
       setIsSubmittingUtr(false);
     }
@@ -269,17 +296,17 @@ function OrderDetailsContent() {
     }
   };
 
-  // Strict Payment Verification & Unlocking Logic
+  // Strict Payment Verification & Unlocking Logic derived directly from order
   const isPaymentApproved = 
-    order?.payment_status?.toLowerCase() === 'approved' ||
-    order?.payment_status?.toLowerCase() === 'verified' ||
-    order?.status?.toLowerCase() === 'completed' ||
+    order?.payment_status?.toLowerCase() === "approved" ||
+    order?.payment_status?.toLowerCase() === "completed" ||
+    order?.status?.toLowerCase() === "completed" ||
     order?.is_paid === true;
 
-  const isUtrSubmitted = 
-    Boolean(order?.utr_number) || 
-    (order?.payment_status as string) === 'pending_verification' || 
-    order?.payment_status === 'verifying';
+  const isUtrPending = 
+    order?.payment_status === "pending_verification" || 
+    order?.payment_status === "verifying" ||
+    Boolean(order?.utr_number && !isPaymentApproved);
 
   // Stepper state progression
   const getStepProgressIndex = () => {
@@ -455,7 +482,7 @@ function OrderDetailsContent() {
                   <CheckCircle2 className="w-3.5 h-3.5" />
                   <span>Approved</span>
                 </span>
-              ) : isUtrSubmitted ? (
+              ) : isUtrPending ? (
                 <span className="text-amber-400 font-bold flex items-center gap-1 animate-pulse">
                   <Clock className="w-3.5 h-3.5" />
                   <span>Verifying UTR</span>
@@ -644,14 +671,14 @@ function OrderDetailsContent() {
               </div>
             )}
 
-            {/* STRICT RENDERING BY STATUS: Unlocked vs Under Verification vs Unpaid */}
+            {/* STRICT RENDERING BY STATUS: Unlocked Deliverables vs Under Verification vs Unpaid */}
             {isPaymentApproved ? (
               /* 1. UNLOCKED DELIVERABLES: Hide UTR form completely and show download buttons */
               <div className="space-y-6 animate-in fade-in duration-300">
                 <div className="p-6 rounded-2xl bg-emerald-950/20 border border-emerald-500/40 text-left space-y-2">
                   <div className="flex items-center gap-2 text-emerald-400 font-bold text-base sm:text-lg">
                     <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
-                    <span>Payment Verified - Download Fixed Code &amp; Viva Defense Sheet</span>
+                    <span>Payment Verified! Your Repaired Project is Ready</span>
                   </div>
                   <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed font-sans">
                     Your repository has been tested with 0 compilation errors and containerized cleanly. The fixed archive and your oral viva preparation dossier are unlocked and ready for download.
@@ -660,7 +687,7 @@ function OrderDetailsContent() {
 
                 {/* Primary Download Buttons */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {/* Button 1: Download Fixed Project */}
+                  {/* Download Button 1: Download Fixed Source Code */}
                   <button
                     type="button"
                     onClick={handleDownloadDeliverable}
@@ -677,7 +704,7 @@ function OrderDetailsContent() {
                     </div>
                     <div>
                       <h4 className="text-base font-extrabold text-white">
-                        {isDownloadingDeliverable ? "Opening Deliverable..." : "Download Fixed Project (.zip)"}
+                        {isDownloadingDeliverable ? "Opening Deliverable..." : "Download Fixed Source Code"}
                       </h4>
                       <p className="text-xs text-orange-100/90 mt-1">
                         Clean code with fixed dependencies &amp; run script.
@@ -685,7 +712,7 @@ function OrderDetailsContent() {
                     </div>
                   </button>
 
-                  {/* Button 2: Download 1-Page Viva Defense Sheet */}
+                  {/* Download Button 2: Download Viva Defense Sheet */}
                   <div className="flex flex-col gap-2">
                     <a
                       href={`/api/deliverables?code=${orderCode}&type=viva`}
@@ -702,7 +729,7 @@ function OrderDetailsContent() {
                       </div>
                       <div>
                         <h4 className="text-base font-extrabold text-white">
-                          Download 1-Page Viva Defense Sheet (.pdf/.md)
+                          Download Viva Defense Sheet (.pdf/.md)
                         </h4>
                         <p className="text-xs text-orange-100/90 mt-1">
                           60s architecture pitch + top 5 oral questions &amp; answers.
@@ -731,19 +758,18 @@ function OrderDetailsContent() {
                   </span>
                 </div>
               </div>
-            ) : isUtrSubmitted ? (
-              /* 2. UTR SUBMITTED: PAYMENT UNDER VERIFICATION */
+            ) : isUtrPending ? (
+              /* 2. UTR SUBMITTED: PAYMENT UNDER VERIFICATION BANNER */
               <div className="p-6 rounded-2xl bg-amber-500/10 border border-amber-500/40 text-left space-y-3 shadow-xl animate-in fade-in duration-300">
                 <div className="flex items-center gap-2 text-amber-400 font-bold text-base">
                   <Clock className="w-5 h-5 flex-shrink-0 animate-pulse" />
-                  <span>🕒 Payment Under Verification: Your UTR is being cross-checked. Downloads will unlock automatically once approved.</span>
+                  <span>Payment Under Verification: Your UTR is being cross-checked. Downloads will unlock automatically once approved.</span>
                 </div>
                 <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed font-mono">
-                  Submitted UTR Reference: <strong className="text-amber-300">{order.utr_number || utrInput}</strong>. 
-                  Our engineer verifies transactions in real time.
+                  Submitted UTR: <strong className="text-amber-300">{order.utr_number || utrInput}</strong>. Verification usually takes 3-7 minutes.
                 </p>
                 <div className="pt-2 flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-400 border-t border-amber-500/20">
-                  <span>Average turnaround: <strong>3–7 minutes</strong></span>
+                  <span>Status: <strong>Verification in progress</strong></span>
                   <button
                     type="button"
                     onClick={handleCheckStatus}
@@ -839,20 +865,6 @@ function OrderDetailsContent() {
                       className="w-full bg-[#18181b] border border-[#27272a] text-white text-sm rounded-xl px-4 py-3 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all font-mono tracking-wider placeholder:text-zinc-600"
                     />
                   </div>
-
-                  {utrError && (
-                    <div className="p-3 rounded-xl bg-red-950/20 border border-red-900/40 text-red-400 text-xs flex items-center gap-2">
-                      <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                      <span>{utrError}</span>
-                    </div>
-                  )}
-
-                  {utrSuccessMsg && (
-                    <div className="p-3 rounded-xl bg-emerald-950/20 border border-emerald-900/40 text-emerald-400 text-xs flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-                      <span>{utrSuccessMsg}</span>
-                    </div>
-                  )}
 
                   <button
                     type="submit"

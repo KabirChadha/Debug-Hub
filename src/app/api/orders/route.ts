@@ -234,7 +234,7 @@ export async function GET(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   try {
     const body = await request.json();
-    const { order_code, status, proof_video_url, fixed_zip_url, utr_number, payment_status } = body;
+    const { order_code, status, proof_video_url, fixed_zip_url, utr_number, payment_status, is_paid, updated_at } = body;
 
     if (!order_code) {
       return NextResponse.json({ error: "Missing order_code" }, { status: 400 });
@@ -249,6 +249,8 @@ export async function PATCH(request: NextRequest) {
     if (fixed_zip_url !== undefined) updates.fixed_zip_url = fixed_zip_url;
     if (utr_number !== undefined) updates.utr_number = utr_number;
     if (payment_status !== undefined) updates.payment_status = payment_status;
+    if (is_paid !== undefined) updates.is_paid = is_paid;
+    if (updated_at !== undefined) updates.updated_at = updated_at;
 
     const { data, error } = await supabase
       .from("orders")

@@ -7,7 +7,7 @@ export type Json =
   | Json[];
 
 export type OrderStatus = 'submitted' | 'in_progress' | 'proof_ready' | 'completed';
-export type PaymentStatus = 'unpaid' | 'verifying' | 'approved';
+export type PaymentStatus = 'unpaid' | 'verifying' | 'pending_verification' | 'approved' | 'completed';
 
 export interface Database {
   public: {
@@ -34,6 +34,7 @@ export interface Database {
           utr_number: string | null;
           payment_status: PaymentStatus;
           created_at: string;
+          updated_at?: string | null;
         };
         Insert: {
           id?: string;
@@ -56,6 +57,7 @@ export interface Database {
           utr_number?: string | null;
           payment_status?: PaymentStatus;
           created_at?: string;
+          updated_at?: string | null;
         };
         Update: {
           id?: string;
@@ -78,6 +80,7 @@ export interface Database {
           utr_number?: string | null;
           payment_status?: PaymentStatus;
           created_at?: string;
+          updated_at?: string | null;
         };
         Relationships: [];
       };

@@ -48,6 +48,16 @@ alter table public.orders add column if not exists user_id uuid references auth.
 alter table public.orders add column if not exists user_email text;
 alter table public.orders add column if not exists utr_number text;
 alter table public.orders add column if not exists payment_status text not null default 'unpaid';
+alter table public.orders add column if not exists is_paid boolean default false;
+alter table public.orders add column if not exists updated_at timestamptz default now();
+
+-- Enable Realtime publication on orders table
+do $$ begin
+  alter publication supabase_realtime add table public.orders;
+exception
+  when duplicate_object then null;
+  when undefined_object then null;
+end $$;
 
 -- Index for instant lookup by order_code
 create index if not exists idx_orders_order_code on public.orders (order_code);
