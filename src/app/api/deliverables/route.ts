@@ -1,31 +1,51 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createAdminClient, createClient } from "@/lib/supabase/server";
 
 export const maxDuration = 30;
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const code = searchParams.get("code") || "FIX-DEMO";
+  const code = (searchParams.get("code") || "FIX-DEMO").trim().toUpperCase();
   const type = searchParams.get("type") || "project";
 
+  const supabase = createAdminClient ? createAdminClient() : await createClient();
+
   if (type === "viva") {
+    // Attempt to enrich viva defense sheet with real order details if found
+    let techStack = "Modern Modular Architecture";
+    let issueDescription = "Runtime crash and configuration resolution";
+
+    try {
+      const { data: order } = await supabase
+        .from("orders")
+        .select("tech_stack, issue_description")
+        .ilike("order_code", code)
+        .maybeSingle();
+
+      if (order?.tech_stack) techStack = order.tech_stack;
+      if (order?.issue_description) issueDescription = order.issue_description;
+    } catch {
+      // Use standard default defense sheet if DB offline
+    }
+
     const vivaContent = `# CAMPUS CODE FIX: 1-PAGE VIVA DEFENSE SHEET
 # CONFIDENTIAL CAPSTONE DEFENSE DOSSIER
 # Order Reference: ${code}
+# Technology Stack: ${techStack}
 
 --------------------------------------------------------------------------------
 1. 60-SECOND ARCHITECTURE PITCH (Memorize for oral introduction)
 --------------------------------------------------------------------------------
-"Our application is built as a modular modern architecture. The client interface
-utilizes React with Next.js App Router for optimal rendering performance. State
-and real-time data persistence are managed through an asynchronous database layer,
-isolated behind strictly enforced Row Level Security (RLS) policies. Critical
-background tasks are decoupled into asynchronous worker routines to guarantee
-zero blocking on primary presentation threads."
+"Our application is built as a modular modern architecture utilizing ${techStack}. The client interface
+utilizes optimal component rendering patterns. State and real-time data persistence
+are managed through an asynchronous database layer, isolated behind strictly enforced
+Row Level Security (RLS) policies. Critical background tasks are decoupled into
+asynchronous worker routines to guarantee zero blocking on primary presentation threads."
 
 --------------------------------------------------------------------------------
 2. ROOT CAUSE SUMMARY & REPAIR LOG
 --------------------------------------------------------------------------------
-- Original Crash Symptom: Runtime crash with unhandled promise rejection & DB lock timeout.
+- Original Crash Symptom: ${issueDescription}
 - Root Cause Identified: Detached event listeners in real-time subscriptions and unpooled
   database connection exhaustion.
 - Engineering Resolution Applied:
@@ -68,24 +88,68 @@ Row Level Security policies that validate the user's authenticated session claim
     });
   }
 
-  // Project download mock zip / payload
-  const projectSummary = `# CAMPUS CODE FIX - REPAIRED REPOSITORY
-Order ID: ${code}
-Status: 100% Verified Run Passing
+  // Real Project Deliverable: Fetch from Supabase Storage 'deliverables' bucket
+  try {
+    // 1. Check if order record specifies fixed_zip_url
+    const { data: order } = await supabase
+      .from("orders")
+      .select("fixed_zip_url, status, payment_status")
+      .ilike("order_code", code)
+      .maybeSingle();
 
-Installation & Execution Instructions:
-1. Extract repository files.
-2. Run 'npm install' or 'pip install -r requirements.txt'.
-3. Run 'npm run dev' or 'python main.py'.
-4. Open http://localhost:3000 in your browser.
-`;
+    if (order?.fixed_zip_url) {
+      const fixedUrl = order.fixed_zip_url.trim();
+      // If absolute remote URL, redirect directly
+      if (fixedUrl.startsWith("http://") || fixedUrl.startsWith("https://")) {
+        return NextResponse.redirect(fixedUrl);
+      }
+    }
 
-  return new NextResponse(projectSummary, {
-    status: 200,
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Content-Disposition": `attachment; filename="fixed-project-${code}.txt"`,
-    },
-  });
+    // 2. Query Supabase Storage from bucket 'deliverables'
+    const storagePath = `${code}/fixed-project.zip`;
+
+    // Attempt 1: Generate signed URL with download attachment header
+    const { data: signedData, error: signedError } = await supabase.storage
+      .from("deliverables")
+      .createSignedUrl(storagePath, 3600, { download: `fixed-project-${code}.zip` });
+
+    if (!signedError && signedData?.signedUrl) {
+      return NextResponse.redirect(signedData.signedUrl);
+    }
+
+    // Attempt 2: Direct binary download stream from deliverables bucket
+    const { data: fileData, error: fileError } = await supabase.storage
+      .from("deliverables")
+      .download(storagePath);
+
+    if (!fileError && fileData) {
+      const arrayBuffer = await fileData.arrayBuffer();
+      return new NextResponse(arrayBuffer, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/zip",
+          "Content-Disposition": `attachment; filename="fixed-project-${code}.zip"`,
+        },
+      });
+    }
+
+    // If file cannot be found in storage
+    return NextResponse.json(
+      {
+        error: "Deliverable package not found. Ensure the fixed project archive has been uploaded.",
+        order_code: code,
+      },
+      { status: 404 }
+    );
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Deliverable retrieval failed";
+    console.error("Deliverable download error:", message);
+    return NextResponse.json(
+      {
+        error: "Deliverable package not found. Ensure the fixed project archive has been uploaded.",
+        order_code: code,
+      },
+      { status: 404 }
+    );
+  }
 }
-

@@ -98,6 +98,7 @@ function AdminDashboardContent() {
   // Orders state
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoadingOrders, setIsLoadingOrders] = useState<boolean>(false);
+  const [downloadingOrderId, setDownloadingOrderId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
 
@@ -316,6 +317,92 @@ function AdminDashboardContent() {
     }
   };
 
+  // Action: Download original student code / source file directly from 'project-intakes'
+  const handleDownloadStudentFile = async (order: Order) => {
+    const filePath = order.file_storage_path || order.zip_storage_path;
+    if (!filePath) {
+      showToast(
+        "File not found in storage.",
+        "Ensure the student completed file upload."
+      );
+      return;
+    }
+
+    const fileName =
+      order.file_name ||
+      filePath.split("/").pop() ||
+      `student-source-${order.order_code}`;
+
+    setDownloadingOrderId(order.id || order.order_code);
+
+    try {
+      // 1. Direct query via Supabase client to 'project-intakes' bucket
+      const supabase = createClient();
+      const { data, error } = await supabase.storage
+        .from("project-intakes")
+        .createSignedUrl(filePath, 3600, { download: fileName });
+
+      if (!error && data?.signedUrl) {
+        const a = document.createElement("a");
+        a.href = data.signedUrl;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        showToast("Download Started", `Fetching ${fileName} from project-intakes`);
+        return;
+      }
+
+      // 2. Authoritative server-side download via admin endpoint
+      const res = await fetch(
+        `/api/admin/download-intake?code=${encodeURIComponent(order.order_code)}&path=${encodeURIComponent(filePath)}&filename=${encodeURIComponent(fileName)}`,
+        {
+          headers: {
+            "x-admin-key": adminKey,
+          },
+        }
+      );
+
+      if (!res.ok) {
+        throw new Error("File not found in storage. Ensure the student completed file upload.");
+      }
+
+      const contentType = res.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        const json = await res.json();
+        if (json.signedUrl) {
+          const a = document.createElement("a");
+          a.href = json.signedUrl;
+          a.download = fileName;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          showToast("Download Started", `Fetching ${fileName} from project-intakes`);
+          return;
+        }
+        throw new Error(json.error || "File not found in storage. Ensure the student completed file upload.");
+      }
+
+      const blob = await res.blob();
+      const objectUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(objectUrl);
+      showToast("Download Complete", `Downloaded ${fileName}`);
+    } catch {
+      showToast(
+        "File not found in storage.",
+        "Ensure the student completed file upload."
+      );
+    } finally {
+      setDownloadingOrderId(null);
+    }
+  };
+
   // Execute Upload in Modal with direct-to-storage support for files up to 50MB
   const handleUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -398,7 +485,7 @@ function AdminDashboardContent() {
       );
 
       showToast(
-        uploadType === "video" ? "Proof Video Uploaded" : "Fixed Zip Uploaded",
+        uploadType === "video" ? "Proof Video Uploaded" : "Fixed Solution Uploaded",
         `Order ${activeModalOrder.order_code} updated successfully.`
       );
 
@@ -663,7 +750,7 @@ function AdminDashboardContent() {
                   <th className="py-3.5 px-4">Status</th>
                   <th className="py-3.5 px-4">Payment &amp; UTR</th>
                   <th className="py-3.5 px-4">Submitted</th>
-                  <th className="py-3.5 px-4">Intake File</th>
+                  <th className="py-3.5 px-4 min-w-[220px]">Student Submission</th>
                   <th className="py-3.5 px-4 text-right">Actions</th>
                 </tr>
               </thead>
@@ -794,28 +881,34 @@ function AdminDashboardContent() {
                             const fileName =
                               order.file_name ||
                               (order.file_storage_path || order.zip_storage_path || "").split("/").pop() ||
-                              `client-intake-${order.order_code}.zip`;
+                              `student-code-${order.order_code}.zip`;
                             const { badge, style } = getAdminFileBadge(fileName);
+                            const isDownloading = downloadingOrderId === (order.id || order.order_code);
 
                             return (
-                              <div className="flex flex-col gap-1 items-start min-w-[130px]">
-                                <div className="flex items-center gap-1.5 max-w-[180px]" title={fileName}>
+                              <div className="flex flex-col gap-2 items-start min-w-[190px]">
+                                <div className="flex items-center gap-1.5 max-w-[220px]" title={fileName}>
                                   <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border ${style}`}>
                                     {badge}
                                   </span>
-                                  <span className="text-xs text-white font-mono truncate">
+                                  <span className="text-xs text-white font-mono truncate font-medium">
                                     {fileName}
                                   </span>
                                 </div>
-                                <a
-                                  href={`/api/deliverables?code=${order.order_code}&type=project`}
-                                  download={fileName}
-                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#09090b] hover:bg-zinc-800 text-orange-400 border border-[#27272a] hover:border-orange-500/40 text-[10px] font-mono transition-colors whitespace-nowrap"
-                                  title={`Download ${fileName}`}
+                                <button
+                                  type="button"
+                                  onClick={() => handleDownloadStudentFile(order)}
+                                  disabled={isDownloading}
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#09090b] hover:bg-zinc-800 text-orange-400 hover:text-orange-300 border border-[#27272a] hover:border-orange-500/50 text-[10px] font-mono transition-all whitespace-nowrap cursor-pointer disabled:opacity-50 shadow-sm"
+                                  title={`Download original student source file (${fileName}) directly from Supabase Storage bucket 'project-intakes'`}
                                 >
-                                  <Download className="w-3 h-3 text-orange-400" />
-                                  <span>Download</span>
-                                </a>
+                                  {isDownloading ? (
+                                    <RefreshCw className="w-3 h-3 text-orange-400 animate-spin" />
+                                  ) : (
+                                    <Download className="w-3 h-3 text-orange-400" />
+                                  )}
+                                  <span>{isDownloading ? "Downloading..." : "Download Student Code / Source File"}</span>
+                                </button>
                               </div>
                             );
                           })()}
@@ -870,14 +963,14 @@ function AdminDashboardContent() {
                               <span>{order.proof_video_url ? "Reupload Video" : "Upload Proof Video"}</span>
                             </button>
 
-                            {/* Action 3: Upload Fixed Zip & Viva Guide */}
+                            {/* Action 3: Upload Fixed Solution */}
                             <button
                               onClick={() => openUploadModal(order, "fixed_zip")}
                               className="px-2.5 py-1 rounded-lg bg-[#09090b] hover:bg-zinc-800 text-zinc-200 border border-[#27272a] hover:border-orange-500/40 text-[11px] font-semibold transition-all cursor-pointer flex items-center gap-1 whitespace-nowrap"
-                              title="Upload fixed project archive (.zip)"
+                              title="Upload fixed solution (.zip) to deliverables bucket"
                             >
                               <FileArchive className="w-3 h-3 text-orange-400" />
-                              <span>{order.fixed_zip_url ? "Reupload Fixed Zip" : "Upload Fixed Zip & Viva Guide"}</span>
+                              <span>{order.fixed_zip_url ? "Reupload Fixed Solution" : "Upload Fixed Solution"}</span>
                             </button>
 
                             {/* Action 4: Mark Completed */}
@@ -920,10 +1013,10 @@ function AdminDashboardContent() {
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-white">
-                    {uploadType === "video" ? "Upload Verified Proof Video" : "Upload Fixed Zip & Viva Guide"}
+                    {uploadType === "video" ? "Upload Verified Proof Video" : "Upload Fixed Solution (Deliverables Bucket)"}
                   </h3>
                   <p className="text-xs text-zinc-400 font-mono">
-                    Order Reference: #{activeModalOrder.order_code}
+                    Order Reference: #{activeModalOrder.order_code} • Bucket: deliverables
                   </p>
                 </div>
               </div>
@@ -944,7 +1037,7 @@ function AdminDashboardContent() {
             <form onSubmit={handleUploadSubmit} className="mt-5 space-y-4">
               <div>
                 <label className="block text-xs font-mono uppercase tracking-wider text-orange-400 font-bold mb-2">
-                  {uploadType === "video" ? "Select MP4 / WebM Execution Recording" : "Select Fixed Project Archive (.zip)"}
+                  {uploadType === "video" ? "Select MP4 / WebM Execution Recording" : "Select Fixed Project Archive (.zip) for Deliverables Bucket"}
                 </label>
                 
                 <input
