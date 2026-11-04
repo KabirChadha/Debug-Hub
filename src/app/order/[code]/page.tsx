@@ -38,6 +38,24 @@ const STEPS = [
 
 const UPI_ID = "chadhakabir77@okaxis";
 
+export type PaymentStep = "unpaid" | "under_verification" | "unlocked";
+
+export function isOrderUnlocked(orderData: Partial<Order> | null | undefined): boolean {
+  if (!orderData) return false;
+  const paymentStatus = typeof orderData.payment_status === "string" ? orderData.payment_status.trim().toLowerCase() : "";
+  const status = typeof orderData.status === "string" ? orderData.status.trim().toLowerCase() : "";
+  const isPaid = orderData.is_paid === true;
+
+  return (
+    paymentStatus === "approved" ||
+    paymentStatus === "verified" ||
+    paymentStatus === "completed" ||
+    status === "completed" ||
+    status === "delivered" ||
+    isPaid
+  );
+}
+
 function OrderDetailsContent() {
   const params = useParams();
   const searchParams = useSearchParams();
@@ -48,6 +66,7 @@ function OrderDetailsContent() {
   const [order, setOrder] = useState<Order | null>(null);
   const [currentStatus, setCurrentStatus] = useState<OrderStatus>("submitted");
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>("unpaid");
+  const [paymentStep, setPaymentStep] = useState<PaymentStep>("unpaid");
   const [toastVisible, setToastVisible] = useState(() => searchParams.get("copied") === "true");
   const [hasCopied, setHasCopied] = useState(false);
   const [hasCopiedUpi, setHasCopiedUpi] = useState(false);
@@ -68,18 +87,66 @@ function OrderDetailsContent() {
       if (!orderCode) return;
       try {
         const supabase = createClient();
-        const { data, error } = await supabase
+        let { data } = await supabase
           .from("orders")
           .select("*")
-          .ilike("order_code", orderCode)
+          .eq("order_code", orderCode)
           .maybeSingle();
+
+        if (!data) {
+          const ilikeRes = await supabase
+            .from("orders")
+            .select("*")
+            .ilike("order_code", orderCode)
+            .maybeSingle();
+          data = ilikeRes.data;
+        }
+
+        // Fallback to internal API route if client direct query misses
+        if (!data) {
+          try {
+            const apiRes = await fetch(`/api/orders?code=${encodeURIComponent(orderCode)}`);
+            if (apiRes.ok) {
+              const apiJson = await apiRes.json();
+              if (apiJson.order) {
+                data = apiJson.order;
+              }
+            }
+          } catch (apiErr) {
+            console.warn("API fallback error:", apiErr);
+          }
+        }
 
         if (!isMounted) return;
 
-        if (data && !error) {
+        if (data) {
           setOrder(data);
-          setCurrentStatus(data.status);
-          setPaymentStatus(data.payment_status || "unpaid");
+          const normalizedPayment = (data.payment_status || "").toLowerCase().trim();
+          const normalizedStatus = (data.status || "").toLowerCase().trim();
+
+          // If payment is already submitted or approved, do NOT reset back to UTR input
+          if (
+            ["approved", "verified", "completed"].includes(normalizedPayment) ||
+            ["completed", "delivered"].includes(normalizedStatus) ||
+            data.is_paid === true
+          ) {
+            setPaymentStep("unlocked");
+            setPaymentStatus("approved");
+            setCurrentStatus("completed");
+          } else if (
+            data.utr_number ||
+            normalizedPayment === "pending_verification" ||
+            normalizedPayment === "verifying"
+          ) {
+            setPaymentStep("under_verification");
+            setPaymentStatus("verifying");
+            if (data.status) setCurrentStatus(data.status);
+          } else {
+            setPaymentStep("unpaid");
+            setPaymentStatus("unpaid");
+            if (data.status) setCurrentStatus(data.status);
+          }
+
           if (data.utr_number) {
             setUtrInput(data.utr_number);
           }
@@ -106,6 +173,7 @@ function OrderDetailsContent() {
           setOrder(fallbackOrder);
           setCurrentStatus("submitted");
           setPaymentStatus("unpaid");
+          setPaymentStep("unpaid");
         }
       } catch (err: unknown) {
         console.warn("Could not fetch remote order:", err);
@@ -119,22 +187,69 @@ function OrderDetailsContent() {
     };
   }, [orderCode]);
 
-  // Manual Refresh
-  const handleManualRefresh = async () => {
+  // Re-fetch the fresh order row from Supabase / API
+  const handleCheckStatus = async () => {
     if (!orderCode) return;
     setIsRefreshing(true);
     try {
       const supabase = createClient();
-      const { data, error } = await supabase
+      let { data } = await supabase
         .from("orders")
         .select("*")
-        .ilike("order_code", orderCode)
+        .eq("order_code", orderCode)
         .maybeSingle();
 
-      if (data && !error) {
+      if (!data) {
+        const ilikeRes = await supabase
+          .from("orders")
+          .select("*")
+          .ilike("order_code", orderCode)
+          .maybeSingle();
+        data = ilikeRes.data;
+      }
+
+      if (!data) {
+        try {
+          const apiRes = await fetch(`/api/orders?code=${encodeURIComponent(orderCode)}`);
+          if (apiRes.ok) {
+            const apiJson = await apiRes.json();
+            if (apiJson.order) {
+              data = apiJson.order;
+            }
+          }
+        } catch (apiErr) {
+          console.warn("API fallback error:", apiErr);
+        }
+      }
+
+      if (data) {
         setOrder(data);
-        setCurrentStatus(data.status);
-        setPaymentStatus(data.payment_status || "unpaid");
+        const normalizedPayment = (data.payment_status || "").toLowerCase().trim();
+        const normalizedStatus = (data.status || "").toLowerCase().trim();
+
+        // If payment is already submitted or approved, do NOT reset back to UTR input
+        if (
+          ["approved", "verified", "completed"].includes(normalizedPayment) ||
+          ["completed", "delivered"].includes(normalizedStatus) ||
+          data.is_paid === true
+        ) {
+          setPaymentStep("unlocked");
+          setPaymentStatus("approved");
+          setCurrentStatus("completed");
+        } else if (
+          data.utr_number ||
+          normalizedPayment === "pending_verification" ||
+          normalizedPayment === "verifying"
+        ) {
+          setPaymentStep("under_verification");
+          setPaymentStatus("verifying");
+          if (data.status) setCurrentStatus(data.status);
+        } else {
+          setPaymentStep("unpaid");
+          setPaymentStatus("unpaid");
+          if (data.status) setCurrentStatus(data.status);
+        }
+
         if (data.utr_number) {
           setUtrInput(data.utr_number);
         }
@@ -229,6 +344,9 @@ function OrderDetailsContent() {
 
   // Stepper state helper
   const getStepProgressIndex = () => {
+    if (paymentStep === "unlocked" || isOrderUnlocked(order)) {
+      return 3;
+    }
     switch (currentStatus) {
       case "submitted":
         return 0;
@@ -244,6 +362,12 @@ function OrderDetailsContent() {
   };
 
   const activeIndex = getStepProgressIndex();
+  const isUnlocked = paymentStep === "unlocked" || isOrderUnlocked(order);
+  const isUnderVerification = !isUnlocked && (paymentStep === "under_verification" || Boolean(order?.utr_number && paymentStatus === "verifying"));
+  const deliverableUrl =
+    (order as Record<string, unknown>)?.deliverable_url as string ||
+    order?.fixed_zip_url ||
+    `/api/deliverables?code=${orderCode}&type=project`;
 
   return (
     <>
@@ -280,9 +404,6 @@ function OrderDetailsContent() {
                   key={st}
                   onClick={() => {
                     setCurrentStatus(st);
-                    if (st === "completed" && paymentStatus === "unpaid") {
-                      // Keep payment status or allow toggling
-                    }
                   }}
                   className={`px-2 py-0.5 rounded cursor-pointer transition-colors ${
                     currentStatus === st
@@ -301,10 +422,20 @@ function OrderDetailsContent() {
                   key={ps}
                   onClick={() => {
                     setPaymentStatus(ps);
+                    if (ps === "approved") {
+                      setPaymentStep("unlocked");
+                      setCurrentStatus("completed");
+                    } else if (ps === "verifying") {
+                      setPaymentStep("under_verification");
+                    } else {
+                      setPaymentStep("unpaid");
+                    }
                     if (order) setOrder({ ...order, payment_status: ps });
                   }}
                   className={`px-2 py-0.5 rounded cursor-pointer transition-colors ${
-                    paymentStatus === ps
+                    (ps === "approved" && isUnlocked) ||
+                    (ps === "verifying" && isUnderVerification) ||
+                    (ps === "unpaid" && !isUnlocked && !isUnderVerification)
                       ? ps === "approved"
                         ? "bg-emerald-500 text-black font-bold"
                         : ps === "verifying"
@@ -320,7 +451,7 @@ function OrderDetailsContent() {
             </div>
 
             <button
-              onClick={handleManualRefresh}
+              onClick={handleCheckStatus}
               disabled={isRefreshing}
               className="p-2 rounded-xl bg-[#18181b] hover:bg-zinc-800 text-zinc-400 hover:text-white border border-[#27272a] transition-colors cursor-pointer"
               title="Refresh Telemetry"
@@ -400,12 +531,12 @@ function OrderDetailsContent() {
             </div>
             <div className="p-3.5 rounded-xl bg-[#09090b] border border-[#27272a] col-span-2 sm:col-span-1">
               <span className="text-zinc-500 block mb-1">Payment Status</span>
-              {paymentStatus === "approved" ? (
+              {isUnlocked ? (
                 <span className="text-emerald-400 font-bold flex items-center gap-1">
                   <CheckCircle2 className="w-3.5 h-3.5" />
                   <span>Approved</span>
                 </span>
-              ) : paymentStatus === "verifying" ? (
+              ) : isUnderVerification ? (
                 <span className="text-amber-400 font-bold flex items-center gap-1 animate-pulse">
                   <Clock className="w-3.5 h-3.5" />
                   <span>Verifying UTR</span>
@@ -491,8 +622,8 @@ function OrderDetailsContent() {
           {/* 2. CONDITIONAL STATES */}
           <div className="mt-8 pt-6 border-t border-[#27272a]">
             
-            {/* STATE A: When status is 'submitted' or 'in_progress' */}
-            {(currentStatus === "submitted" || currentStatus === "in_progress") && (
+            {/* STATE A: When status is 'submitted' or 'in_progress' and not yet unlocked */}
+            {(currentStatus === "submitted" || currentStatus === "in_progress") && !isUnlocked && (
               <div className="space-y-4 animate-in fade-in duration-300">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -564,8 +695,8 @@ function OrderDetailsContent() {
               </div>
             )}
 
-            {/* STATE B: When status is 'proof_ready' */}
-            {currentStatus === "proof_ready" && (
+            {/* STATE B: When status is 'proof_ready', 'completed', or isUnlocked */}
+            {(isUnlocked || currentStatus === "proof_ready" || currentStatus === "completed") && (
               <div className="space-y-6 animate-in zoom-in-95 duration-300">
                 
                 {/* Proof Video Section */}
@@ -574,7 +705,7 @@ function OrderDetailsContent() {
                     <div className="flex items-center gap-2">
                       <Video className="w-5 h-5 text-emerald-400" />
                       <h3 className="text-base font-bold text-white">
-                        Run Verified! Watch Execution Proof
+                        {isUnlocked ? "Archived Verification Proof" : "Run Verified! Watch Execution Proof"}
                       </h3>
                     </div>
                     <span className="text-xs font-mono text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/30">
@@ -602,44 +733,121 @@ function OrderDetailsContent() {
                   )}
                 </div>
 
-                {/* Verification Warning or UPI Payment Gate */}
-                {paymentStatus === "verifying" ? (
-                  <div className="p-6 rounded-2xl bg-amber-500/10 border border-amber-500/40 text-left space-y-3">
+                {/* GATING / DELIVERABLES VIEW */}
+                {isUnlocked ? (
+                  /* 1. UNLOCKED VIEW: HIDE UTR FORM COMPLETELY & SHOW GREEN CARD + DOWNLOAD BUTTONS */
+                  <div className="space-y-6 animate-in fade-in duration-300">
+                    {/* Green Celebration Card */}
+                    <div className="p-6 rounded-2xl bg-emerald-950/20 border border-emerald-500/40 text-left space-y-2">
+                      <div className="flex items-center gap-2 text-emerald-400 font-bold text-base sm:text-lg">
+                        <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
+                        <span>Payment Verified - Download Fixed Code &amp; Viva Defense Sheet</span>
+                      </div>
+                      <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed font-sans">
+                        Your repository has been tested with 0 compilation errors and containerized cleanly. The fixed archive and your oral viva preparation dossier are unlocked and ready for download.
+                      </p>
+                    </div>
+
+                    {/* TWO ORANGE PRIMARY DOWNLOAD BUTTONS */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {/* Button 1: Download Fixed Project */}
+                      <a
+                        href={deliverableUrl}
+                        download={`fixed-project-${orderCode}.zip`}
+                        className="p-5 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold transition-all duration-200 shadow-[0_0_30px_rgba(249,115,22,0.4)] hover:shadow-[0_0_40px_rgba(249,115,22,0.6)] flex flex-col justify-between group cursor-pointer border border-orange-400"
+                      >
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="w-10 h-10 rounded-xl bg-black/20 flex items-center justify-center">
+                            <Download className="w-5 h-5 group-hover:translate-y-0.5 transition-transform" />
+                          </div>
+                          <span className="text-[10px] font-mono uppercase font-bold bg-black/30 px-2 py-0.5 rounded">
+                            .ZIP ARCHIVE
+                          </span>
+                        </div>
+                        <div>
+                          <h4 className="text-base font-extrabold text-white">
+                            Download Fixed Project (.zip)
+                          </h4>
+                          <p className="text-xs text-orange-100/90 mt-1">
+                            Clean code with fixed dependencies &amp; run script.
+                          </p>
+                        </div>
+                      </a>
+
+                      {/* Button 2: Download 1-Page Viva Defense Sheet */}
+                      <div className="flex flex-col gap-2">
+                        <a
+                          href={`/api/deliverables?code=${orderCode}&type=viva`}
+                          download={`viva-defense-${orderCode}.pdf`}
+                          className="p-5 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold transition-all duration-200 shadow-[0_0_30px_rgba(249,115,22,0.4)] hover:shadow-[0_0_40px_rgba(249,115,22,0.6)] flex flex-col justify-between group cursor-pointer border border-orange-400"
+                        >
+                          <div className="flex items-center justify-between mb-4">
+                            <div className="w-10 h-10 rounded-xl bg-black/20 flex items-center justify-center">
+                              <FileCode2 className="w-5 h-5 group-hover:translate-y-0.5 transition-transform" />
+                            </div>
+                            <span className="text-[10px] font-mono uppercase font-bold bg-black/30 px-2 py-0.5 rounded">
+                              .PDF / .MD
+                            </span>
+                          </div>
+                          <div>
+                            <h4 className="text-base font-extrabold text-white">
+                              Download 1-Page Viva Defense Sheet (.pdf/.md)
+                            </h4>
+                            <p className="text-xs text-orange-100/90 mt-1">
+                              60s architecture pitch + top 5 oral questions &amp; answers.
+                            </p>
+                          </div>
+                        </a>
+
+                        {/* Instant Inline Preview Button */}
+                        <button
+                          type="button"
+                          onClick={() => setIsVivaModalOpen(true)}
+                          className="w-full py-2.5 px-4 rounded-xl bg-[#18181b] hover:bg-zinc-800 text-orange-400 hover:text-orange-300 border border-orange-500/30 text-xs font-mono font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span>Preview Viva Sheet in Browser (Instant)</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Handover Notice */}
+                    <div className="p-4 rounded-xl bg-[#09090b] border border-[#27272a] flex items-center justify-between text-xs text-zinc-400">
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                        <span>Ephemeral sandbox purged. Zero record leaks guarantee.</span>
+                      </div>
+                      <span className="text-emerald-400 font-mono">
+                        All Tests Passed
+                      </span>
+                    </div>
+                  </div>
+                ) : isUnderVerification ? (
+                  /* 2. UNDER VERIFICATION WARNING WITH REFRESH HANDLER */
+                  <div className="p-6 rounded-2xl bg-amber-500/10 border border-amber-500/40 text-left space-y-3 shadow-xl">
                     <div className="flex items-center gap-2 text-amber-400 font-bold text-base">
                       <Clock className="w-5 h-5 flex-shrink-0 animate-pulse" />
-                      <span>🕒 Payment Under Verification</span>
+                      <span>🕒 Payment Under Verification: Your UTR is being cross-checked. Downloads will unlock automatically once approved.</span>
                     </div>
-                    <p className="text-sm text-zinc-200 leading-relaxed font-mono">
-                      Your UTR (<strong className="text-amber-300">{order?.utr_number || utrInput}</strong>) is being cross-checked. Downloads will unlock automatically once approved.
+                    <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed font-mono">
+                      Submitted UTR Reference: <strong className="text-amber-300">{order?.utr_number || utrInput}</strong>. 
+                      Our engineer verifies transactions in real time.
                     </p>
-                    <div className="pt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-400 border-t border-amber-500/20">
+                    <div className="pt-2 flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-400 border-t border-amber-500/20">
                       <span>Average turnaround: <strong>3–7 minutes</strong></span>
                       <button
-                        onClick={handleManualRefresh}
-                        className="text-orange-400 hover:text-orange-300 font-semibold underline cursor-pointer"
+                        type="button"
+                        onClick={handleCheckStatus}
+                        disabled={isRefreshing}
+                        className="px-3.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-black font-semibold transition-colors cursor-pointer flex items-center gap-1.5"
                       >
-                        Check verification status now
+                        <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
+                        <span>{isRefreshing ? "Checking..." : "Check verification status now"}</span>
                       </button>
                     </div>
                   </div>
-                ) : paymentStatus === "approved" ? (
-                  <div className="p-6 rounded-2xl bg-emerald-950/20 border border-emerald-500/40 text-left space-y-2">
-                    <div className="flex items-center gap-2 text-emerald-400 font-bold text-base">
-                      <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
-                      <span>Payment Approved (₹400 Verified)</span>
-                    </div>
-                    <p className="text-xs text-zinc-300">
-                      Your payment has been cleared by the engineer. Advance to the final step to download all patched files and viva defense documents.
-                    </p>
-                    <button
-                      onClick={() => setCurrentStatus("completed")}
-                      className="mt-2 px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs transition-colors cursor-pointer"
-                    >
-                      Go to Downloads →
-                    </button>
-                  </div>
                 ) : (
-                  /* Payment Gate Card for Unpaid State */
+                  /* 3. UNPAID STATE: PAYMENT GATE CARD & UTR INPUT FORM */
                   <div className="p-6 sm:p-8 rounded-2xl bg-[#09090b] border border-orange-500/40 shadow-2xl relative glow-orange-border">
                     <div className="flex items-start gap-4 pb-5 border-b border-[#27272a]">
                       <div className="w-12 h-12 rounded-xl bg-orange-500/10 border border-orange-500/30 text-orange-400 flex items-center justify-center flex-shrink-0">
@@ -650,10 +858,10 @@ function OrderDetailsContent() {
                           PLEDGE CONFIRMATION
                         </span>
                         <h3 className="text-xl sm:text-2xl font-extrabold text-white mt-0.5">
-                          Flat ₹400 via Merchant UPI
+                          Flat Rate • ₹400 • No Run = ₹0 Charged
                         </h3>
                         <p className="text-xs sm:text-sm text-zinc-400 mt-1">
-                          Your code runs cleanly. Pay the flat student rate of ₹400 to unlock your fixed code package and 1-Page Viva Defense Sheet.
+                          Your project is completely fixed and verified. Please complete payment of ₹400 to unlock deliverables.
                         </p>
                       </div>
                     </div>
@@ -663,7 +871,7 @@ function OrderDetailsContent() {
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div>
                           <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400 block mb-1">
-                            Official Merchant UPI ID:
+                            Merchant UPI ID:
                           </span>
                           <div className="flex items-center gap-2">
                             <code className="text-sm sm:text-base text-orange-400 font-mono font-bold bg-[#09090b] px-3 py-1.5 rounded-lg border border-orange-500/30 select-all">
@@ -746,226 +954,6 @@ function OrderDetailsContent() {
                         <span>{isSubmittingUtr ? "Submitting UTR Reference..." : "Submit UTR for Verification"}</span>
                       </button>
                     </form>
-                  </div>
-                )}
-
-              </div>
-            )}
-
-            {/* STATE C: When status is 'completed' */}
-            {currentStatus === "completed" && (
-              <div className="space-y-6 animate-in zoom-in-95 duration-300">
-                {/* Proof Video Player also accessible in completed */}
-                {order?.proof_video_url && (
-                  <div className="space-y-2">
-                    <span className="text-xs font-mono uppercase tracking-wider text-zinc-400 font-bold block">
-                      Archived Verification Proof:
-                    </span>
-                    <div className="relative overflow-hidden rounded-xl border border-orange-500/30 bg-black">
-                      <video 
-                        controls 
-                        playsInline
-                        preload="metadata"
-                        src={order.proof_video_url} 
-                        className="w-full max-h-[360px] rounded-lg object-contain bg-black"
-                      >
-                        Your browser does not support HTML5 video streaming.
-                      </video>
-                    </div>
-                  </div>
-                )}
-
-                {/* STRICT PAYMENT GATING LOGIC */}
-                {paymentStatus !== "approved" ? (
-                  <div className="space-y-4">
-                    {paymentStatus === "verifying" ? (
-                      /* Warning badge when UTR is under verification */
-                      <div className="p-6 rounded-2xl bg-amber-500/10 border border-amber-500/40 text-left space-y-3 shadow-xl">
-                        <div className="flex items-center gap-2 text-amber-400 font-bold text-base">
-                          <Clock className="w-5 h-5 flex-shrink-0 animate-pulse" />
-                          <span>🕒 Payment Under Verification: Your UTR is being cross-checked. Downloads will unlock automatically once approved.</span>
-                        </div>
-                        <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed font-mono">
-                          Submitted UTR Reference: <strong className="text-amber-300">{order?.utr_number || utrInput}</strong>. 
-                          Our engineer verifies transactions in real time.
-                        </p>
-                        <div className="pt-2 flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-400 border-t border-amber-500/20">
-                          <span>Downloads strictly locked until verification confirms.</span>
-                          <button
-                            onClick={handleManualRefresh}
-                            className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-black font-semibold transition-colors cursor-pointer"
-                          >
-                            Refresh Verification Status
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      /* Unpaid gate if user jumped directly to completed or has not paid yet */
-                      <div className="p-6 sm:p-8 rounded-2xl bg-[#09090b] border border-orange-500/40 shadow-2xl relative glow-orange-border">
-                        <div className="flex items-start gap-4 pb-5 border-b border-[#27272a]">
-                          <div className="w-12 h-12 rounded-xl bg-orange-500/10 border border-orange-500/30 text-orange-400 flex items-center justify-center flex-shrink-0">
-                            <Lock className="w-6 h-6" />
-                          </div>
-                          <div>
-                            <span className="text-xs font-mono uppercase tracking-widest text-orange-400 font-bold">
-                              PAYMENT REQUIRED TO UNLOCK
-                            </span>
-                            <h3 className="text-xl sm:text-2xl font-extrabold text-white mt-0.5">
-                              Flat Rate • ₹400 • No Run = ₹0 Charged
-                            </h3>
-                            <p className="text-xs sm:text-sm text-zinc-400 mt-1">
-                              Your project is completely fixed and verified. Please complete payment of ₹400 to unlock deliverables.
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* UPI Payment Box */}
-                        <div className="mt-5 p-5 rounded-xl bg-[#18181b] border border-[#27272a] space-y-4">
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                            <div>
-                              <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400 block mb-1">
-                                Merchant UPI ID:
-                              </span>
-                              <div className="flex items-center gap-2">
-                                <code className="text-sm sm:text-base text-orange-400 font-mono font-bold bg-[#09090b] px-3 py-1.5 rounded-lg border border-orange-500/30 select-all">
-                                  {UPI_ID}
-                                </code>
-                                <button
-                                  type="button"
-                                  onClick={handleCopyUpiId}
-                                  className="px-3 py-1.5 rounded-lg bg-[#09090b] hover:bg-zinc-800 text-zinc-300 hover:text-white border border-[#27272a] text-xs font-mono transition-colors flex items-center gap-1.5 cursor-pointer"
-                                >
-                                  {hasCopiedUpi ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-orange-400" />}
-                                  <span>{hasCopiedUpi ? "Copied" : "Copy"}</span>
-                                </button>
-                              </div>
-                            </div>
-
-                            <a
-                              href={`upi://pay?pa=${UPI_ID}&pn=CampusCodeFix&am=400&cu=INR&tn=Order%20${orderCode}`}
-                              className="px-4 py-2 rounded-xl bg-orange-500/15 hover:bg-orange-500 text-orange-400 hover:text-white border border-orange-500/30 text-xs font-bold transition-all flex items-center justify-center gap-1.5"
-                            >
-                              <QrCode className="w-4 h-4" />
-                              <span>Pay ₹400 via UPI</span>
-                            </a>
-                          </div>
-
-                          <form onSubmit={handleSubmitUtr} className="space-y-3 pt-2">
-                            <label className="block text-xs font-mono uppercase tracking-wider text-orange-400 font-bold">
-                              Enter 12-Digit UPI Transaction Reference (UTR)
-                            </label>
-                            <div className="flex flex-col sm:flex-row gap-2">
-                              <input
-                                type="text"
-                                required
-                                value={utrInput}
-                                onChange={(e) => setUtrInput(e.target.value)}
-                                placeholder="E.g., 430981928410"
-                                className="flex-1 bg-[#09090b] border border-[#27272a] text-white text-sm rounded-xl px-4 py-2.5 focus:outline-none focus:border-orange-500 font-mono tracking-wider placeholder:text-zinc-600"
-                              />
-                              <button
-                                type="submit"
-                                disabled={isSubmittingUtr}
-                                className="px-5 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5"
-                              >
-                                <Send className="w-3.5 h-3.5" />
-                                <span>{isSubmittingUtr ? "Submitting..." : "Submit UTR"}</span>
-                              </button>
-                            </div>
-                            {utrError && <p className="text-xs text-red-400 font-mono">{utrError}</p>}
-                            {utrSuccessMsg && <p className="text-xs text-emerald-400 font-mono">{utrSuccessMsg}</p>}
-                          </form>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  /* PAYMENT APPROVED: UNLOCK TWO ORANGE PRIMARY DOWNLOAD BUTTONS */
-                  <div className="space-y-6">
-                    {/* Celebration Header */}
-                    <div className="p-6 rounded-2xl bg-emerald-950/20 border border-emerald-500/40 text-left space-y-2">
-                      <div className="flex items-center gap-2 text-emerald-400 font-bold text-base">
-                        <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
-                        <span>Run Verification &amp; Handover Complete! Payment Approved.</span>
-                      </div>
-                      <p className="text-xs text-zinc-300 leading-relaxed">
-                        Your repository has been tested with 0 compilation errors and containerized cleanly. The fixed archive and your oral viva preparation dossier are unlocked and ready for download.
-                      </p>
-                    </div>
-
-                    {/* TWO ORANGE PRIMARY DOWNLOAD BUTTONS */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      {/* Button 1: Download Fixed Project */}
-                      <a
-                        href={`/api/deliverables?code=${orderCode}&type=project`}
-                        download={`fixed-project-${orderCode}.zip`}
-                        className="p-5 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold transition-all duration-200 shadow-[0_0_30px_rgba(249,115,22,0.4)] hover:shadow-[0_0_40px_rgba(249,115,22,0.6)] flex flex-col justify-between group cursor-pointer border border-orange-400"
-                      >
-                        <div className="flex items-center justify-between mb-4">
-                          <div className="w-10 h-10 rounded-xl bg-black/20 flex items-center justify-center">
-                            <Download className="w-5 h-5 group-hover:translate-y-0.5 transition-transform" />
-                          </div>
-                          <span className="text-[10px] font-mono uppercase font-bold bg-black/30 px-2 py-0.5 rounded">
-                            .ZIP ARCHIVE
-                          </span>
-                        </div>
-                        <div>
-                          <h4 className="text-base font-extrabold text-white">
-                            Download Fixed Project (.zip)
-                          </h4>
-                          <p className="text-xs text-orange-100/90 mt-1">
-                            Clean code with fixed dependencies &amp; run script.
-                          </p>
-                        </div>
-                      </a>
-
-                      {/* Button 2: Download 1-Page Viva Defense Sheet */}
-                      <div className="flex flex-col gap-2">
-                        <a
-                          href={`/api/deliverables?code=${orderCode}&type=viva`}
-                          download={`viva-defense-${orderCode}.pdf`}
-                          className="p-5 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold transition-all duration-200 shadow-[0_0_30px_rgba(249,115,22,0.4)] hover:shadow-[0_0_40px_rgba(249,115,22,0.6)] flex flex-col justify-between group cursor-pointer border border-orange-400"
-                        >
-                          <div className="flex items-center justify-between mb-4">
-                            <div className="w-10 h-10 rounded-xl bg-black/20 flex items-center justify-center">
-                              <FileCode2 className="w-5 h-5 group-hover:translate-y-0.5 transition-transform" />
-                            </div>
-                            <span className="text-[10px] font-mono uppercase font-bold bg-black/30 px-2 py-0.5 rounded">
-                              .PDF / .MD
-                            </span>
-                          </div>
-                          <div>
-                            <h4 className="text-base font-extrabold text-white">
-                              Download 1-Page Viva Defense Sheet (.pdf/.md)
-                            </h4>
-                            <p className="text-xs text-orange-100/90 mt-1">
-                              60s architecture pitch + top 5 oral questions &amp; answers.
-                            </p>
-                          </div>
-                        </a>
-
-                        {/* Instant Inline Preview Button */}
-                        <button
-                          type="button"
-                          onClick={() => setIsVivaModalOpen(true)}
-                          className="py-2 px-3 rounded-xl bg-[#18181b] hover:bg-[#27272a] text-xs font-semibold text-orange-400 border border-[#27272a] hover:border-orange-500/40 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                        >
-                          <Sparkles className="w-3.5 h-3.5" />
-                          <span>Preview Viva Defense Sheet Online</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Handover Notice */}
-                    <div className="p-4 rounded-xl bg-[#09090b] border border-[#27272a] flex items-center justify-between text-xs text-zinc-400">
-                      <div className="flex items-center gap-2">
-                        <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                        <span>Ephemeral sandbox purged. Zero record leaks guarantee.</span>
-                      </div>
-                      <span className="text-emerald-400 font-mono">
-                        All Tests Passed
-                      </span>
-                    </div>
                   </div>
                 )}
 

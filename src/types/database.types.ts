@@ -27,6 +27,8 @@ export interface Database {
           zip_storage_path: string | null;
           proof_video_url: string | null;
           fixed_zip_url: string | null;
+          deliverable_url?: string | null;
+          is_paid?: boolean | null;
           user_id: string | null;
           user_email: string | null;
           utr_number: string | null;
@@ -47,6 +49,8 @@ export interface Database {
           zip_storage_path?: string | null;
           proof_video_url?: string | null;
           fixed_zip_url?: string | null;
+          deliverable_url?: string | null;
+          is_paid?: boolean | null;
           user_id?: string | null;
           user_email?: string | null;
           utr_number?: string | null;
@@ -67,6 +71,8 @@ export interface Database {
           zip_storage_path?: string | null;
           proof_video_url?: string | null;
           fixed_zip_url?: string | null;
+          deliverable_url?: string | null;
+          is_paid?: boolean | null;
           user_id?: string | null;
           user_email?: string | null;
           utr_number?: string | null;
@@ -98,6 +104,8 @@ export interface Database {
           zip_storage_path: string | null;
           proof_video_url: string | null;
           fixed_zip_url: string | null;
+          deliverable_url?: string | null;
+          is_paid?: boolean | null;
           user_id: string | null;
           user_email: string | null;
           utr_number: string | null;
