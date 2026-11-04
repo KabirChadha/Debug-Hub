@@ -90,15 +90,16 @@ Row Level Security policies that validate the user's authenticated session claim
 
   // Real Project Deliverable: Fetch from Supabase Storage 'deliverables' bucket
   try {
-    // 1. Check if order record specifies fixed_zip_url
+    // 1. Check if order record specifies fixed_zip_url or deliverable_url
     const { data: order } = await supabase
       .from("orders")
-      .select("fixed_zip_url, status, payment_status")
+      .select("fixed_zip_url, deliverable_url, status, payment_status")
       .ilike("order_code", code)
       .maybeSingle();
 
-    if (order?.fixed_zip_url) {
-      const fixedUrl = order.fixed_zip_url.trim();
+    const directUrl = (order as Record<string, unknown>)?.deliverable_url as string || order?.fixed_zip_url;
+    if (directUrl) {
+      const fixedUrl = directUrl.trim();
       // If absolute remote URL, redirect directly
       if (fixedUrl.startsWith("http://") || fixedUrl.startsWith("https://")) {
         return NextResponse.redirect(fixedUrl);
@@ -106,7 +107,15 @@ Row Level Security policies that validate the user's authenticated session claim
     }
 
     // 2. Query Supabase Storage from bucket 'deliverables'
-    const storagePath = `${code}/fixed-project.zip`;
+    let storagePath = `${code}/fixed-project.zip`;
+    try {
+      const { data: listFiles } = await supabase.storage.from("deliverables").list(code);
+      if (listFiles && listFiles.length > 0) {
+        storagePath = `${code}/${listFiles[0].name}`;
+      }
+    } catch {
+      // Fallback to default path
+    }
 
     // Attempt 1: Generate signed URL with download attachment header
     const { data: signedData, error: signedError } = await supabase.storage

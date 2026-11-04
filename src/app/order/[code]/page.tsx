@@ -27,7 +27,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { Toast } from "@/components/Toast";
 import { VivaPreviewModal } from "@/components/VivaPreviewModal";
-import type { Order, OrderStatus, PaymentStatus } from "@/types/database.types";
+import type { Order } from "@/types/database.types";
 
 const STEPS = [
   { id: "step-1", title: "Received & Queued", desc: "Sandbox mounted & sanitized" },
@@ -38,22 +38,38 @@ const STEPS = [
 
 const UPI_ID = "chadhakabir77@okaxis";
 
-export type PaymentStep = "unpaid" | "under_verification" | "unlocked";
+// Helper: Fetch real order record from Supabase / API fallback
+async function getOrderRecord(orderCode: string): Promise<Order | null> {
+  if (!orderCode) return null;
+  try {
+    const supabase = createClient();
+    const { data: directData } = await supabase
+      .from("orders")
+      .select("*")
+      .eq("order_code", orderCode)
+      .maybeSingle();
 
-export function isOrderUnlocked(orderData: Partial<Order> | null | undefined): boolean {
-  if (!orderData) return false;
-  const paymentStatus = typeof orderData.payment_status === "string" ? orderData.payment_status.trim().toLowerCase() : "";
-  const status = typeof orderData.status === "string" ? orderData.status.trim().toLowerCase() : "";
-  const isPaid = orderData.is_paid === true;
+    if (directData) return directData;
 
-  return (
-    paymentStatus === "approved" ||
-    paymentStatus === "verified" ||
-    paymentStatus === "completed" ||
-    status === "completed" ||
-    status === "delivered" ||
-    isPaid
-  );
+    const { data: ilikeData } = await supabase
+      .from("orders")
+      .select("*")
+      .ilike("order_code", orderCode)
+      .maybeSingle();
+
+    if (ilikeData) return ilikeData;
+
+    const apiRes = await fetch(`/api/orders?code=${encodeURIComponent(orderCode)}`);
+    if (apiRes.ok) {
+      const apiJson = await apiRes.json();
+      if (apiJson.order) {
+        return apiJson.order as Order;
+      }
+    }
+  } catch (err: unknown) {
+    console.warn("Error retrieving order:", err);
+  }
+  return null;
 }
 
 function OrderDetailsContent() {
@@ -61,16 +77,15 @@ function OrderDetailsContent() {
   const searchParams = useSearchParams();
 
   const rawCode = (params?.code as string) || "";
-  const orderCode = decodeURIComponent(rawCode).toUpperCase();
+  const orderCode = decodeURIComponent(rawCode).trim().toUpperCase();
 
   const [order, setOrder] = useState<Order | null>(null);
-  const [currentStatus, setCurrentStatus] = useState<OrderStatus>("submitted");
-  const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>("unpaid");
-  const [paymentStep, setPaymentStep] = useState<PaymentStep>("unpaid");
+  const [isLoading, setIsLoading] = useState(() => Boolean(orderCode));
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isDownloadingDeliverable, setIsDownloadingDeliverable] = useState(false);
   const [toastVisible, setToastVisible] = useState(() => searchParams.get("copied") === "true");
   const [hasCopied, setHasCopied] = useState(false);
   const [hasCopiedUpi, setHasCopiedUpi] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   
   // UTR Payment States
   const [utrInput, setUtrInput] = useState("");
@@ -79,183 +94,46 @@ function OrderDetailsContent() {
   const [utrSuccessMsg, setUtrSuccessMsg] = useState<string | null>(null);
   const [isVivaModalOpen, setIsVivaModalOpen] = useState(false);
 
-  // Fetch Order from Supabase
+  // 1. Source of truth from Supabase on mount
   useEffect(() => {
-    let isMounted = true;
+    let ignore = false;
 
-    async function fetchOrder() {
-      if (!orderCode) return;
-      try {
-        const supabase = createClient();
-        let { data } = await supabase
-          .from("orders")
-          .select("*")
-          .eq("order_code", orderCode)
-          .maybeSingle();
+    if (!orderCode) return;
 
-        if (!data) {
-          const ilikeRes = await supabase
-            .from("orders")
-            .select("*")
-            .ilike("order_code", orderCode)
-            .maybeSingle();
-          data = ilikeRes.data;
-        }
-
-        // Fallback to internal API route if client direct query misses
-        if (!data) {
-          try {
-            const apiRes = await fetch(`/api/orders?code=${encodeURIComponent(orderCode)}`);
-            if (apiRes.ok) {
-              const apiJson = await apiRes.json();
-              if (apiJson.order) {
-                data = apiJson.order;
-              }
-            }
-          } catch (apiErr) {
-            console.warn("API fallback error:", apiErr);
+    getOrderRecord(orderCode).then((record) => {
+      if (!ignore) {
+        if (record) {
+          setOrder(record);
+          if (record.utr_number) {
+            setUtrInput(record.utr_number);
           }
         }
-
-        if (!isMounted) return;
-
-        if (data) {
-          setOrder(data);
-          const normalizedPayment = (data.payment_status || "").toLowerCase().trim();
-          const normalizedStatus = (data.status || "").toLowerCase().trim();
-
-          // If payment is already submitted or approved, do NOT reset back to UTR input
-          if (
-            ["approved", "verified", "completed"].includes(normalizedPayment) ||
-            ["completed", "delivered"].includes(normalizedStatus) ||
-            data.is_paid === true
-          ) {
-            setPaymentStep("unlocked");
-            setPaymentStatus("approved");
-            setCurrentStatus("completed");
-          } else if (
-            data.utr_number ||
-            normalizedPayment === "pending_verification" ||
-            normalizedPayment === "verifying"
-          ) {
-            setPaymentStep("under_verification");
-            setPaymentStatus("verifying");
-            if (data.status) setCurrentStatus(data.status);
-          } else {
-            setPaymentStep("unpaid");
-            setPaymentStatus("unpaid");
-            if (data.status) setCurrentStatus(data.status);
-          }
-
-          if (data.utr_number) {
-            setUtrInput(data.utr_number);
-          }
-        } else {
-          // Local sandbox fallback for preview testing
-          const fallbackOrder: Order = {
-            id: "local-preview-id",
-            order_code: orderCode,
-            contact_handle: "@anonymous_student",
-            tech_stack: "React / Next.js",
-            issue_description: "Capstone code triage in progress. Senior engineer assigned.",
-            status: "submitted",
-            file_name: "project_source.py",
-            file_storage_path: `raw/${orderCode}/project_source.py`,
-            zip_storage_path: `raw/${orderCode}/project_source.py`,
-            proof_video_url: null,
-            fixed_zip_url: null,
-            user_id: null,
-            user_email: null,
-            utr_number: null,
-            payment_status: "unpaid",
-            created_at: new Date().toISOString(),
-          };
-          setOrder(fallbackOrder);
-          setCurrentStatus("submitted");
-          setPaymentStatus("unpaid");
-          setPaymentStep("unpaid");
-        }
-      } catch (err: unknown) {
-        console.warn("Could not fetch remote order:", err);
+        setIsLoading(false);
       }
-    }
-
-    fetchOrder();
+    });
 
     return () => {
-      isMounted = false;
+      ignore = true;
     };
   }, [orderCode]);
 
-  // Re-fetch the fresh order row from Supabase / API
+  // Fetch / refresh order row from Supabase
+  const fetchOrder = async () => {
+    const record = await getOrderRecord(orderCode);
+    if (record) {
+      setOrder(record);
+      if (record.utr_number) {
+        setUtrInput(record.utr_number);
+      }
+    }
+    return record;
+  };
+
+  // Refresh handler
   const handleCheckStatus = async () => {
-    if (!orderCode) return;
     setIsRefreshing(true);
     try {
-      const supabase = createClient();
-      let { data } = await supabase
-        .from("orders")
-        .select("*")
-        .eq("order_code", orderCode)
-        .maybeSingle();
-
-      if (!data) {
-        const ilikeRes = await supabase
-          .from("orders")
-          .select("*")
-          .ilike("order_code", orderCode)
-          .maybeSingle();
-        data = ilikeRes.data;
-      }
-
-      if (!data) {
-        try {
-          const apiRes = await fetch(`/api/orders?code=${encodeURIComponent(orderCode)}`);
-          if (apiRes.ok) {
-            const apiJson = await apiRes.json();
-            if (apiJson.order) {
-              data = apiJson.order;
-            }
-          }
-        } catch (apiErr) {
-          console.warn("API fallback error:", apiErr);
-        }
-      }
-
-      if (data) {
-        setOrder(data);
-        const normalizedPayment = (data.payment_status || "").toLowerCase().trim();
-        const normalizedStatus = (data.status || "").toLowerCase().trim();
-
-        // If payment is already submitted or approved, do NOT reset back to UTR input
-        if (
-          ["approved", "verified", "completed"].includes(normalizedPayment) ||
-          ["completed", "delivered"].includes(normalizedStatus) ||
-          data.is_paid === true
-        ) {
-          setPaymentStep("unlocked");
-          setPaymentStatus("approved");
-          setCurrentStatus("completed");
-        } else if (
-          data.utr_number ||
-          normalizedPayment === "pending_verification" ||
-          normalizedPayment === "verifying"
-        ) {
-          setPaymentStep("under_verification");
-          setPaymentStatus("verifying");
-          if (data.status) setCurrentStatus(data.status);
-        } else {
-          setPaymentStep("unpaid");
-          setPaymentStatus("unpaid");
-          if (data.status) setCurrentStatus(data.status);
-        }
-
-        if (data.utr_number) {
-          setUtrInput(data.utr_number);
-        }
-      }
-    } catch (err: unknown) {
-      console.warn("Refresh error:", err);
+      await fetchOrder();
     } finally {
       setIsRefreshing(false);
     }
@@ -316,19 +194,19 @@ function OrderDetailsContent() {
         throw new Error("Failed to submit UTR reference");
       }
 
-      setPaymentStatus("verifying");
+      // Optimistically update order state with submitted UTR and verifying status
       if (order) {
         setOrder({
           ...order,
           utr_number: trimmed,
           payment_status: "verifying",
         });
+      } else {
+        await fetchOrder();
       }
       setUtrSuccessMsg("UTR submitted successfully! Our verification engineer is matching your transaction.");
     } catch (err: unknown) {
       console.warn("UTR submission fallback:", err);
-      // Fallback local update
-      setPaymentStatus("verifying");
       if (order) {
         setOrder({
           ...order,
@@ -336,18 +214,79 @@ function OrderDetailsContent() {
           payment_status: "verifying",
         });
       }
-      setUtrSuccessMsg("UTR submitted! Telemetry set to verifying.");
+      setUtrSuccessMsg("UTR submitted! Verifying status.");
     } finally {
       setIsSubmittingUtr(false);
     }
   };
 
-  // Stepper state helper
+  // Deliverable Download Handler
+  const handleDownloadDeliverable = async () => {
+    setIsDownloadingDeliverable(true);
+    try {
+      const explicitUrl =
+        (order as Record<string, unknown>)?.deliverable_url as string ||
+        order?.fixed_zip_url;
+
+      // 1. Direct absolute URL (e.g. Supabase Storage publicUrl or external URL)
+      if (explicitUrl && (explicitUrl.startsWith("http://") || explicitUrl.startsWith("https://"))) {
+        window.open(explicitUrl, "_blank");
+        return;
+      }
+
+      // 2. Query Supabase Storage from 'deliverables' bucket
+      const supabase = createClient();
+      let storagePath = explicitUrl;
+      if (!storagePath) {
+        try {
+          const { data: listFiles } = await supabase.storage.from("deliverables").list(orderCode);
+          if (listFiles && listFiles.length > 0) {
+            storagePath = `${orderCode}/${listFiles[0].name}`;
+          } else {
+            storagePath = `${orderCode}/fixed-project.zip`;
+          }
+        } catch {
+          storagePath = `${orderCode}/fixed-project.zip`;
+        }
+      }
+
+      const { data: signedData, error: signedError } = await supabase.storage
+        .from("deliverables")
+        .createSignedUrl(storagePath, 3600);
+
+      if (!signedError && signedData?.signedUrl) {
+        window.open(signedData.signedUrl, "_blank");
+        return;
+      }
+
+      // 3. Fallback to server route which has service role access to deliverables
+      window.open(`/api/deliverables?code=${encodeURIComponent(orderCode)}&type=project`, "_blank");
+    } catch (err: unknown) {
+      console.warn("Deliverable download error:", err);
+      window.open(`/api/deliverables?code=${encodeURIComponent(orderCode)}&type=project`, "_blank");
+    } finally {
+      setIsDownloadingDeliverable(false);
+    }
+  };
+
+  // Strict Payment Verification & Unlocking Logic
+  const isPaymentApproved = 
+    order?.payment_status?.toLowerCase() === 'approved' ||
+    order?.payment_status?.toLowerCase() === 'verified' ||
+    order?.status?.toLowerCase() === 'completed' ||
+    order?.is_paid === true;
+
+  const isUtrSubmitted = 
+    Boolean(order?.utr_number) || 
+    (order?.payment_status as string) === 'pending_verification' || 
+    order?.payment_status === 'verifying';
+
+  // Stepper state progression
   const getStepProgressIndex = () => {
-    if (paymentStep === "unlocked" || isOrderUnlocked(order)) {
+    if (isPaymentApproved) {
       return 3;
     }
-    switch (currentStatus) {
+    switch (order?.status) {
       case "submitted":
         return 0;
       case "in_progress":
@@ -362,12 +301,45 @@ function OrderDetailsContent() {
   };
 
   const activeIndex = getStepProgressIndex();
-  const isUnlocked = paymentStep === "unlocked" || isOrderUnlocked(order);
-  const isUnderVerification = !isUnlocked && (paymentStep === "under_verification" || Boolean(order?.utr_number && paymentStatus === "verifying"));
-  const deliverableUrl =
-    (order as Record<string, unknown>)?.deliverable_url as string ||
-    order?.fixed_zip_url ||
-    `/api/deliverables?code=${orderCode}&type=project`;
+
+  if (isLoading) {
+    return (
+      <div className="max-w-md mx-auto text-center py-20 space-y-4">
+        <div className="w-10 h-10 border-2 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto" />
+        <p className="text-xs text-zinc-400 font-mono">Connecting to telemetry vault for #{orderCode}...</p>
+      </div>
+    );
+  }
+
+  if (!order) {
+    return (
+      <div className="max-w-md mx-auto text-center py-20 space-y-4">
+        <div className="w-12 h-12 rounded-2xl bg-orange-500/10 border border-orange-500/30 text-orange-400 flex items-center justify-center mx-auto">
+          <AlertCircle className="w-6 h-6" />
+        </div>
+        <h2 className="text-xl font-bold text-white">Order #{orderCode} Not Found</h2>
+        <p className="text-xs text-zinc-400 leading-relaxed">
+          We couldn&apos;t find this tracking ticket in the database. Please verify your order reference or reach out to our team.
+        </p>
+        <div className="pt-4 flex items-center justify-center gap-3">
+          <button
+            onClick={handleCheckStatus}
+            disabled={isRefreshing}
+            className="px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold flex items-center gap-2 cursor-pointer transition-colors"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
+            <span>Retry Search</span>
+          </button>
+          <Link
+            href="/"
+            className="px-4 py-2 rounded-xl bg-[#18181b] border border-[#27272a] hover:bg-zinc-800 text-zinc-300 hover:text-white text-xs font-semibold transition-colors"
+          >
+            Back Home
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -395,68 +367,15 @@ function OrderDetailsContent() {
             <span>Back to CampusCodeFix Home</span>
           </Link>
 
-          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-            {/* Interactive Demo State Switcher */}
-            <div className="flex flex-wrap items-center gap-1 bg-[#18181b] border border-[#27272a] rounded-lg p-1 text-[11px] font-mono">
-              <span className="text-zinc-500 px-1.5 hidden md:inline">Demo:</span>
-              {(["submitted", "in_progress", "proof_ready", "completed"] as OrderStatus[]).map((st) => (
-                <button
-                  key={st}
-                  onClick={() => {
-                    setCurrentStatus(st);
-                  }}
-                  className={`px-2 py-0.5 rounded cursor-pointer transition-colors ${
-                    currentStatus === st
-                      ? "bg-orange-500 text-white font-bold"
-                      : "text-zinc-400 hover:text-white"
-                  }`}
-                >
-                  {st.replace("_", "-")}
-                </button>
-              ))}
-
-              <span className="text-zinc-600 px-1">|</span>
-
-              {(["unpaid", "verifying", "approved"] as PaymentStatus[]).map((ps) => (
-                <button
-                  key={ps}
-                  onClick={() => {
-                    setPaymentStatus(ps);
-                    if (ps === "approved") {
-                      setPaymentStep("unlocked");
-                      setCurrentStatus("completed");
-                    } else if (ps === "verifying") {
-                      setPaymentStep("under_verification");
-                    } else {
-                      setPaymentStep("unpaid");
-                    }
-                    if (order) setOrder({ ...order, payment_status: ps });
-                  }}
-                  className={`px-2 py-0.5 rounded cursor-pointer transition-colors ${
-                    (ps === "approved" && isUnlocked) ||
-                    (ps === "verifying" && isUnderVerification) ||
-                    (ps === "unpaid" && !isUnlocked && !isUnderVerification)
-                      ? ps === "approved"
-                        ? "bg-emerald-500 text-black font-bold"
-                        : ps === "verifying"
-                        ? "bg-amber-500 text-black font-bold"
-                        : "bg-zinc-700 text-white font-bold"
-                      : "text-zinc-400 hover:text-white"
-                  }`}
-                  title={`Test payment status: ${ps}`}
-                >
-                  {ps}
-                </button>
-              ))}
-            </div>
-
+          <div className="flex items-center gap-2">
             <button
               onClick={handleCheckStatus}
               disabled={isRefreshing}
-              className="p-2 rounded-xl bg-[#18181b] hover:bg-zinc-800 text-zinc-400 hover:text-white border border-[#27272a] transition-colors cursor-pointer"
+              className="px-3.5 py-1.5 rounded-xl bg-[#18181b] hover:bg-zinc-800 text-zinc-300 hover:text-white border border-[#27272a] text-xs font-mono transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50"
               title="Refresh Telemetry"
             >
-              <RefreshCw className={`w-4 h-4 ${isRefreshing ? "animate-spin text-orange-400" : ""}`} />
+              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin text-orange-400" : ""}`} />
+              <span>{isRefreshing ? "Refreshing..." : "Refresh Status"}</span>
             </button>
           </div>
         </div>
@@ -510,19 +429,19 @@ function OrderDetailsContent() {
             <div className="p-3.5 rounded-xl bg-[#09090b] border border-[#27272a]">
               <span className="text-zinc-500 block mb-1">Contact Handle</span>
               <span className="font-mono text-zinc-300 font-medium truncate block">
-                {order?.contact_handle || "@anonymous_student"}
+                {order.contact_handle || "@anonymous_student"}
               </span>
             </div>
             <div className="p-3.5 rounded-xl bg-[#09090b] border border-[#27272a]">
               <span className="text-zinc-500 block mb-1">Tech Stack</span>
               <span className="font-semibold text-zinc-200 truncate block">
-                {order?.tech_stack || "React / Next.js"}
+                {order.tech_stack || "React / Next.js"}
               </span>
             </div>
             <div className="p-3.5 rounded-xl bg-[#09090b] border border-[#27272a]">
               <span className="text-zinc-500 block mb-1">Mounted File</span>
-              <span className="font-mono text-orange-400 font-semibold truncate block" title={order?.file_name || "project_source.py"}>
-                {order?.file_name || (order?.file_storage_path ? order.file_storage_path.split("/").pop() : "project_source.py")}
+              <span className="font-mono text-orange-400 font-semibold truncate block" title={order.file_name || "project_source"}>
+                {order.file_name || (order.file_storage_path ? order.file_storage_path.split("/").pop() : "project_source")}
               </span>
             </div>
             <div className="p-3.5 rounded-xl bg-[#09090b] border border-[#27272a]">
@@ -531,12 +450,12 @@ function OrderDetailsContent() {
             </div>
             <div className="p-3.5 rounded-xl bg-[#09090b] border border-[#27272a] col-span-2 sm:col-span-1">
               <span className="text-zinc-500 block mb-1">Payment Status</span>
-              {isUnlocked ? (
+              {isPaymentApproved ? (
                 <span className="text-emerald-400 font-bold flex items-center gap-1">
                   <CheckCircle2 className="w-3.5 h-3.5" />
                   <span>Approved</span>
                 </span>
-              ) : isUnderVerification ? (
+              ) : isUtrSubmitted ? (
                 <span className="text-amber-400 font-bold flex items-center gap-1 animate-pulse">
                   <Clock className="w-3.5 h-3.5" />
                   <span>Verifying UTR</span>
@@ -549,13 +468,12 @@ function OrderDetailsContent() {
             </div>
           </div>
 
-          {/* 1. VISUAL STATUS STEPPER (Orange Highlights and Pulsing Icons) */}
+          {/* Engineering Progression Stepper */}
           <div className="mt-8 pt-8 border-t border-[#27272a]">
             <h2 className="text-xs font-mono uppercase tracking-wider text-orange-400 font-bold mb-6">
               Engineering Progression Stepper
             </h2>
 
-            {/* Stepper container */}
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 sm:gap-2 relative">
               {STEPS.map((step, idx) => {
                 const isCompleted = activeIndex > idx;
@@ -572,7 +490,6 @@ function OrderDetailsContent() {
                         : "bg-[#09090b] border-[#27272a] text-zinc-600 opacity-60"
                     }`}
                   >
-                    {/* Top Icon & Step Number */}
                     <div className="flex items-center justify-between mb-3">
                       <div
                         className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs transition-colors ${
@@ -598,7 +515,6 @@ function OrderDetailsContent() {
                       )}
                     </div>
 
-                    {/* Step Title & Subtext */}
                     <h4
                       className={`text-xs font-bold leading-tight ${
                         isActive
@@ -619,12 +535,12 @@ function OrderDetailsContent() {
             </div>
           </div>
 
-          {/* 2. CONDITIONAL STATES */}
+          {/* Conditional Sections */}
           <div className="mt-8 pt-6 border-t border-[#27272a]">
             
-            {/* STATE A: When status is 'submitted' or 'in_progress' and not yet unlocked */}
-            {(currentStatus === "submitted" || currentStatus === "in_progress") && !isUnlocked && (
-              <div className="space-y-4 animate-in fade-in duration-300">
+            {/* Active Sandbox Terminal: Displayed during triage if not yet approved */}
+            {!isPaymentApproved && (order.status === "submitted" || order.status === "in_progress" || !order.status) && (
+              <div className="space-y-4 animate-in fade-in duration-300 mb-8">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="relative flex h-2 w-2">
@@ -642,7 +558,6 @@ function OrderDetailsContent() {
 
                 {/* Live Terminal Loader Window */}
                 <div className="rounded-2xl bg-[#000000] border border-[#27272a] shadow-2xl overflow-hidden font-mono text-xs">
-                  {/* Terminal Header */}
                   <div className="flex items-center justify-between px-4 py-2.5 bg-[#18181b] border-b border-[#27272a]">
                     <div className="flex items-center gap-2">
                       <div className="flex gap-1.5">
@@ -659,9 +574,8 @@ function OrderDetailsContent() {
                     </span>
                   </div>
 
-                  {/* Terminal Body with Animated Telemetry Lines */}
                   <div className="p-4 sm:p-5 space-y-2 text-zinc-300 min-h-[180px]">
-                    <p className="text-zinc-500">$ antigravity mount --target=project-intakes/raw/{orderCode}/{order?.file_name || "project_source"}</p>
+                    <p className="text-zinc-500">$ antigravity mount --target=project-intakes/raw/{orderCode}/{order.file_name || "project_source"}</p>
                     <p className="text-emerald-400 flex items-center gap-2">
                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                       <span>[OK] Ephemeral sandbox container provisioned in isolated micro-VM</span>
@@ -695,268 +609,260 @@ function OrderDetailsContent() {
               </div>
             )}
 
-            {/* STATE B: When status is 'proof_ready', 'completed', or isUnlocked */}
-            {(isUnlocked || currentStatus === "proof_ready" || currentStatus === "completed") && (
-              <div className="space-y-6 animate-in zoom-in-95 duration-300">
-                
-                {/* Proof Video Section */}
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      <Video className="w-5 h-5 text-emerald-400" />
-                      <h3 className="text-base font-bold text-white">
-                        {isUnlocked ? "Archived Verification Proof" : "Run Verified! Watch Execution Proof"}
-                      </h3>
-                    </div>
-                    <span className="text-xs font-mono text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/30">
-                      ✓ Zero Errors Verified
-                    </span>
+            {/* Proof Video Section */}
+            {(isPaymentApproved || order.status === "proof_ready" || order.status === "completed" || Boolean(order.proof_video_url)) && (
+              <div className="mb-8">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Video className="w-5 h-5 text-emerald-400" />
+                    <h3 className="text-base font-bold text-white">
+                      {isPaymentApproved ? "Archived Verification Proof" : "Run Verified! Watch Execution Proof"}
+                    </h3>
                   </div>
-
-                  {/* DIRECT HTML5 VIDEO PLAYER */}
-                  {order?.proof_video_url ? (
-                    <div className="relative overflow-hidden rounded-xl border border-orange-500/30 bg-black">
-                      <video 
-                        controls 
-                        playsInline
-                        preload="metadata"
-                        src={order.proof_video_url} 
-                        className="w-full max-h-[420px] rounded-lg object-contain bg-black"
-                      >
-                        Your browser does not support HTML5 video streaming.
-                      </video>
-                    </div>
-                  ) : (
-                    <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-6 text-center text-zinc-400">
-                      <p>⏳ Verification recording will be uploaded here once debugging passes test verification.</p>
-                    </div>
-                  )}
+                  <span className="text-xs font-mono text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/30">
+                    ✓ Zero Errors Verified
+                  </span>
                 </div>
 
-                {/* GATING / DELIVERABLES VIEW */}
-                {isUnlocked ? (
-                  /* 1. UNLOCKED VIEW: HIDE UTR FORM COMPLETELY & SHOW GREEN CARD + DOWNLOAD BUTTONS */
-                  <div className="space-y-6 animate-in fade-in duration-300">
-                    {/* Green Celebration Card */}
-                    <div className="p-6 rounded-2xl bg-emerald-950/20 border border-emerald-500/40 text-left space-y-2">
-                      <div className="flex items-center gap-2 text-emerald-400 font-bold text-base sm:text-lg">
-                        <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
-                        <span>Payment Verified - Download Fixed Code &amp; Viva Defense Sheet</span>
+                {order.proof_video_url ? (
+                  <div className="relative overflow-hidden rounded-xl border border-orange-500/30 bg-black">
+                    <video 
+                      controls 
+                      playsInline
+                      preload="metadata"
+                      src={order.proof_video_url} 
+                      className="w-full max-h-[420px] rounded-lg object-contain bg-black"
+                    >
+                      Your browser does not support HTML5 video streaming.
+                    </video>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-6 text-center text-zinc-400">
+                    <p>⏳ Verification recording will be uploaded here once debugging passes test verification.</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* STRICT RENDERING BY STATUS: Unlocked vs Under Verification vs Unpaid */}
+            {isPaymentApproved ? (
+              /* 1. UNLOCKED DELIVERABLES: Hide UTR form completely and show download buttons */
+              <div className="space-y-6 animate-in fade-in duration-300">
+                <div className="p-6 rounded-2xl bg-emerald-950/20 border border-emerald-500/40 text-left space-y-2">
+                  <div className="flex items-center gap-2 text-emerald-400 font-bold text-base sm:text-lg">
+                    <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
+                    <span>Payment Verified - Download Fixed Code &amp; Viva Defense Sheet</span>
+                  </div>
+                  <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed font-sans">
+                    Your repository has been tested with 0 compilation errors and containerized cleanly. The fixed archive and your oral viva preparation dossier are unlocked and ready for download.
+                  </p>
+                </div>
+
+                {/* Primary Download Buttons */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Button 1: Download Fixed Project */}
+                  <button
+                    type="button"
+                    onClick={handleDownloadDeliverable}
+                    disabled={isDownloadingDeliverable}
+                    className="p-5 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold transition-all duration-200 shadow-[0_0_30px_rgba(249,115,22,0.4)] hover:shadow-[0_0_40px_rgba(249,115,22,0.6)] flex flex-col justify-between group cursor-pointer border border-orange-400 text-left disabled:opacity-60"
+                  >
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="w-10 h-10 rounded-xl bg-black/20 flex items-center justify-center">
+                        <Download className={`w-5 h-5 group-hover:translate-y-0.5 transition-transform ${isDownloadingDeliverable ? "animate-bounce" : ""}`} />
                       </div>
-                      <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed font-sans">
-                        Your repository has been tested with 0 compilation errors and containerized cleanly. The fixed archive and your oral viva preparation dossier are unlocked and ready for download.
+                      <span className="text-[10px] font-mono uppercase font-bold bg-black/30 px-2 py-0.5 rounded">
+                        .ZIP ARCHIVE
+                      </span>
+                    </div>
+                    <div>
+                      <h4 className="text-base font-extrabold text-white">
+                        {isDownloadingDeliverable ? "Opening Deliverable..." : "Download Fixed Project (.zip)"}
+                      </h4>
+                      <p className="text-xs text-orange-100/90 mt-1">
+                        Clean code with fixed dependencies &amp; run script.
                       </p>
                     </div>
+                  </button>
 
-                    {/* TWO ORANGE PRIMARY DOWNLOAD BUTTONS */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      {/* Button 1: Download Fixed Project */}
-                      <a
-                        href={deliverableUrl}
-                        download={`fixed-project-${orderCode}.zip`}
-                        className="p-5 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold transition-all duration-200 shadow-[0_0_30px_rgba(249,115,22,0.4)] hover:shadow-[0_0_40px_rgba(249,115,22,0.6)] flex flex-col justify-between group cursor-pointer border border-orange-400"
-                      >
-                        <div className="flex items-center justify-between mb-4">
-                          <div className="w-10 h-10 rounded-xl bg-black/20 flex items-center justify-center">
-                            <Download className="w-5 h-5 group-hover:translate-y-0.5 transition-transform" />
-                          </div>
-                          <span className="text-[10px] font-mono uppercase font-bold bg-black/30 px-2 py-0.5 rounded">
-                            .ZIP ARCHIVE
-                          </span>
+                  {/* Button 2: Download 1-Page Viva Defense Sheet */}
+                  <div className="flex flex-col gap-2">
+                    <a
+                      href={`/api/deliverables?code=${orderCode}&type=viva`}
+                      download={`viva-defense-${orderCode}.md`}
+                      className="p-5 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold transition-all duration-200 shadow-[0_0_30px_rgba(249,115,22,0.4)] hover:shadow-[0_0_40px_rgba(249,115,22,0.6)] flex flex-col justify-between group cursor-pointer border border-orange-400"
+                    >
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="w-10 h-10 rounded-xl bg-black/20 flex items-center justify-center">
+                          <FileCode2 className="w-5 h-5 group-hover:translate-y-0.5 transition-transform" />
                         </div>
-                        <div>
-                          <h4 className="text-base font-extrabold text-white">
-                            Download Fixed Project (.zip)
-                          </h4>
-                          <p className="text-xs text-orange-100/90 mt-1">
-                            Clean code with fixed dependencies &amp; run script.
-                          </p>
-                        </div>
-                      </a>
+                        <span className="text-[10px] font-mono uppercase font-bold bg-black/30 px-2 py-0.5 rounded">
+                          .PDF / .MD
+                        </span>
+                      </div>
+                      <div>
+                        <h4 className="text-base font-extrabold text-white">
+                          Download 1-Page Viva Defense Sheet (.pdf/.md)
+                        </h4>
+                        <p className="text-xs text-orange-100/90 mt-1">
+                          60s architecture pitch + top 5 oral questions &amp; answers.
+                        </p>
+                      </div>
+                    </a>
 
-                      {/* Button 2: Download 1-Page Viva Defense Sheet */}
-                      <div className="flex flex-col gap-2">
-                        <a
-                          href={`/api/deliverables?code=${orderCode}&type=viva`}
-                          download={`viva-defense-${orderCode}.pdf`}
-                          className="p-5 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white font-bold transition-all duration-200 shadow-[0_0_30px_rgba(249,115,22,0.4)] hover:shadow-[0_0_40px_rgba(249,115,22,0.6)] flex flex-col justify-between group cursor-pointer border border-orange-400"
-                        >
-                          <div className="flex items-center justify-between mb-4">
-                            <div className="w-10 h-10 rounded-xl bg-black/20 flex items-center justify-center">
-                              <FileCode2 className="w-5 h-5 group-hover:translate-y-0.5 transition-transform" />
-                            </div>
-                            <span className="text-[10px] font-mono uppercase font-bold bg-black/30 px-2 py-0.5 rounded">
-                              .PDF / .MD
-                            </span>
-                          </div>
-                          <div>
-                            <h4 className="text-base font-extrabold text-white">
-                              Download 1-Page Viva Defense Sheet (.pdf/.md)
-                            </h4>
-                            <p className="text-xs text-orange-100/90 mt-1">
-                              60s architecture pitch + top 5 oral questions &amp; answers.
-                            </p>
-                          </div>
-                        </a>
+                    <button
+                      type="button"
+                      onClick={() => setIsVivaModalOpen(true)}
+                      className="w-full py-2.5 px-4 rounded-xl bg-[#18181b] hover:bg-zinc-800 text-orange-400 hover:text-orange-300 border border-orange-500/30 text-xs font-mono font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Preview Viva Sheet in Browser (Instant)</span>
+                    </button>
+                  </div>
+                </div>
 
-                        {/* Instant Inline Preview Button */}
+                <div className="p-4 rounded-xl bg-[#09090b] border border-[#27272a] flex items-center justify-between text-xs text-zinc-400">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                    <span>Ephemeral sandbox purged. Zero record leaks guarantee.</span>
+                  </div>
+                  <span className="text-emerald-400 font-mono">
+                    All Tests Passed
+                  </span>
+                </div>
+              </div>
+            ) : isUtrSubmitted ? (
+              /* 2. UTR SUBMITTED: PAYMENT UNDER VERIFICATION */
+              <div className="p-6 rounded-2xl bg-amber-500/10 border border-amber-500/40 text-left space-y-3 shadow-xl animate-in fade-in duration-300">
+                <div className="flex items-center gap-2 text-amber-400 font-bold text-base">
+                  <Clock className="w-5 h-5 flex-shrink-0 animate-pulse" />
+                  <span>🕒 Payment Under Verification: Your UTR is being cross-checked. Downloads will unlock automatically once approved.</span>
+                </div>
+                <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed font-mono">
+                  Submitted UTR Reference: <strong className="text-amber-300">{order.utr_number || utrInput}</strong>. 
+                  Our engineer verifies transactions in real time.
+                </p>
+                <div className="pt-2 flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-400 border-t border-amber-500/20">
+                  <span>Average turnaround: <strong>3–7 minutes</strong></span>
+                  <button
+                    type="button"
+                    onClick={handleCheckStatus}
+                    disabled={isRefreshing}
+                    className="px-3.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-black font-semibold transition-colors cursor-pointer flex items-center gap-1.5"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
+                    <span>{isRefreshing ? "Checking..." : "Check verification status now"}</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* 3. UNPAID STATE: UPI PAYMENT CARD & UTR INPUT FORM */
+              <div className="p-6 sm:p-8 rounded-2xl bg-[#09090b] border border-orange-500/40 shadow-2xl relative glow-orange-border animate-in fade-in duration-300">
+                <div className="flex items-start gap-4 pb-5 border-b border-[#27272a]">
+                  <div className="w-12 h-12 rounded-xl bg-orange-500/10 border border-orange-500/30 text-orange-400 flex items-center justify-center flex-shrink-0">
+                    <Lock className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-mono uppercase tracking-widest text-orange-400 font-bold">
+                      PLEDGE CONFIRMATION
+                    </span>
+                    <h3 className="text-xl sm:text-2xl font-extrabold text-white mt-0.5">
+                      Flat Rate • ₹400 • No Run = ₹0 Charged
+                    </h3>
+                    <p className="text-xs sm:text-sm text-zinc-400 mt-1">
+                      Your project is completely fixed and verified. Please complete payment of ₹400 to unlock deliverables.
+                    </p>
+                  </div>
+                </div>
+
+                {/* UPI Payment Instructions Box */}
+                <div className="mt-5 p-5 rounded-xl bg-[#18181b] border border-[#27272a] space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400 block mb-1">
+                        Merchant UPI ID:
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <code className="text-sm sm:text-base text-orange-400 font-mono font-bold bg-[#09090b] px-3 py-1.5 rounded-lg border border-orange-500/30 select-all">
+                          {UPI_ID}
+                        </code>
                         <button
                           type="button"
-                          onClick={() => setIsVivaModalOpen(true)}
-                          className="w-full py-2.5 px-4 rounded-xl bg-[#18181b] hover:bg-zinc-800 text-orange-400 hover:text-orange-300 border border-orange-500/30 text-xs font-mono font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                          onClick={handleCopyUpiId}
+                          className="px-3 py-1.5 rounded-lg bg-[#09090b] hover:bg-zinc-800 text-zinc-300 hover:text-white border border-[#27272a] text-xs font-mono transition-colors flex items-center gap-1.5 cursor-pointer"
+                          title="Copy UPI ID"
                         >
-                          <Sparkles className="w-3.5 h-3.5" />
-                          <span>Preview Viva Sheet in Browser (Instant)</span>
+                          {hasCopiedUpi ? (
+                            <>
+                              <Check className="w-3.5 h-3.5 text-emerald-400" />
+                              <span className="text-emerald-400 font-bold">Copied</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3.5 h-3.5 text-orange-400" />
+                              <span>Copy</span>
+                            </>
+                          )}
                         </button>
                       </div>
                     </div>
 
-                    {/* Handover Notice */}
-                    <div className="p-4 rounded-xl bg-[#09090b] border border-[#27272a] flex items-center justify-between text-xs text-zinc-400">
-                      <div className="flex items-center gap-2">
-                        <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                        <span>Ephemeral sandbox purged. Zero record leaks guarantee.</span>
-                      </div>
-                      <span className="text-emerald-400 font-mono">
-                        All Tests Passed
-                      </span>
-                    </div>
+                    {/* Pay Directly via UPI Intent App */}
+                    <a
+                      href={`upi://pay?pa=${UPI_ID}&pn=CampusCodeFix&am=400&cu=INR&tn=Order%20${orderCode}`}
+                      className="px-4 py-2 rounded-xl bg-orange-500/15 hover:bg-orange-500 text-orange-400 hover:text-white border border-orange-500/30 text-xs font-bold transition-all flex items-center justify-center gap-1.5 self-start sm:self-auto"
+                    >
+                      <QrCode className="w-4 h-4" />
+                      <span>Open in UPI App (₹400)</span>
+                    </a>
                   </div>
-                ) : isUnderVerification ? (
-                  /* 2. UNDER VERIFICATION WARNING WITH REFRESH HANDLER */
-                  <div className="p-6 rounded-2xl bg-amber-500/10 border border-amber-500/40 text-left space-y-3 shadow-xl">
-                    <div className="flex items-center gap-2 text-amber-400 font-bold text-base">
-                      <Clock className="w-5 h-5 flex-shrink-0 animate-pulse" />
-                      <span>🕒 Payment Under Verification: Your UTR is being cross-checked. Downloads will unlock automatically once approved.</span>
-                    </div>
-                    <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed font-mono">
-                      Submitted UTR Reference: <strong className="text-amber-300">{order?.utr_number || utrInput}</strong>. 
-                      Our engineer verifies transactions in real time.
-                    </p>
-                    <div className="pt-2 flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-400 border-t border-amber-500/20">
-                      <span>Average turnaround: <strong>3–7 minutes</strong></span>
-                      <button
-                        type="button"
-                        onClick={handleCheckStatus}
-                        disabled={isRefreshing}
-                        className="px-3.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-black font-semibold transition-colors cursor-pointer flex items-center gap-1.5"
-                      >
-                        <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
-                        <span>{isRefreshing ? "Checking..." : "Check verification status now"}</span>
-                      </button>
-                    </div>
+
+                  <div className="text-xs text-zinc-400 space-y-1 border-t border-zinc-800 pt-3">
+                    <p>1. Open Google Pay, PhonePe, Paytm, or BHIM.</p>
+                    <p>2. Send <strong>₹400</strong> to UPI ID: <strong className="text-white font-mono">{UPI_ID}</strong></p>
+                    <p>3. Copy the 12-digit UPI UTR / Transaction Reference number and submit below.</p>
                   </div>
-                ) : (
-                  /* 3. UNPAID STATE: PAYMENT GATE CARD & UTR INPUT FORM */
-                  <div className="p-6 sm:p-8 rounded-2xl bg-[#09090b] border border-orange-500/40 shadow-2xl relative glow-orange-border">
-                    <div className="flex items-start gap-4 pb-5 border-b border-[#27272a]">
-                      <div className="w-12 h-12 rounded-xl bg-orange-500/10 border border-orange-500/30 text-orange-400 flex items-center justify-center flex-shrink-0">
-                        <Lock className="w-6 h-6" />
-                      </div>
-                      <div>
-                        <span className="text-xs font-mono uppercase tracking-widest text-orange-400 font-bold">
-                          PLEDGE CONFIRMATION
-                        </span>
-                        <h3 className="text-xl sm:text-2xl font-extrabold text-white mt-0.5">
-                          Flat Rate • ₹400 • No Run = ₹0 Charged
-                        </h3>
-                        <p className="text-xs sm:text-sm text-zinc-400 mt-1">
-                          Your project is completely fixed and verified. Please complete payment of ₹400 to unlock deliverables.
-                        </p>
-                      </div>
-                    </div>
+                </div>
 
-                    {/* UPI Payment Instructions Box */}
-                    <div className="mt-5 p-5 rounded-xl bg-[#18181b] border border-[#27272a] space-y-4">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                        <div>
-                          <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400 block mb-1">
-                            Merchant UPI ID:
-                          </span>
-                          <div className="flex items-center gap-2">
-                            <code className="text-sm sm:text-base text-orange-400 font-mono font-bold bg-[#09090b] px-3 py-1.5 rounded-lg border border-orange-500/30 select-all">
-                              {UPI_ID}
-                            </code>
-                            <button
-                              type="button"
-                              onClick={handleCopyUpiId}
-                              className="px-3 py-1.5 rounded-lg bg-[#09090b] hover:bg-zinc-800 text-zinc-300 hover:text-white border border-[#27272a] text-xs font-mono transition-colors flex items-center gap-1.5 cursor-pointer"
-                              title="Copy UPI ID"
-                            >
-                              {hasCopiedUpi ? (
-                                <>
-                                  <Check className="w-3.5 h-3.5 text-emerald-400" />
-                                  <span className="text-emerald-400 font-bold">Copied</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Copy className="w-3.5 h-3.5 text-orange-400" />
-                                  <span>Copy</span>
-                                </>
-                              )}
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Pay Directly via UPI Intent App */}
-                        <a
-                          href={`upi://pay?pa=${UPI_ID}&pn=CampusCodeFix&am=400&cu=INR&tn=Order%20${orderCode}`}
-                          className="px-4 py-2 rounded-xl bg-orange-500/15 hover:bg-orange-500 text-orange-400 hover:text-white border border-orange-500/30 text-xs font-bold transition-all flex items-center justify-center gap-1.5 self-start sm:self-auto"
-                        >
-                          <QrCode className="w-4 h-4" />
-                          <span>Open in UPI App (₹400)</span>
-                        </a>
-                      </div>
-
-                      <div className="text-xs text-zinc-400 space-y-1 border-t border-zinc-800 pt-3">
-                        <p>1. Open Google Pay, PhonePe, Paytm, or BHIM.</p>
-                        <p>2. Send <strong>₹400</strong> to UPI ID: <strong className="text-white font-mono">{UPI_ID}</strong></p>
-                        <p>3. Copy the 12-digit UPI UTR / Transaction Reference number and submit below.</p>
-                      </div>
-                    </div>
-
-                    {/* UTR Input Form */}
-                    <form onSubmit={handleSubmitUtr} className="mt-5 space-y-4">
-                      <div>
-                        <label className="block text-xs font-mono uppercase tracking-wider text-orange-400 font-bold mb-2">
-                          Enter 12-Digit UPI Transaction Reference (UTR)
-                        </label>
-                        <input
-                          type="text"
-                          required
-                          value={utrInput}
-                          onChange={(e) => setUtrInput(e.target.value)}
-                          placeholder="E.g., 430981928410"
-                          className="w-full bg-[#18181b] border border-[#27272a] text-white text-sm rounded-xl px-4 py-3 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all font-mono tracking-wider placeholder:text-zinc-600"
-                        />
-                      </div>
-
-                      {utrError && (
-                        <div className="p-3 rounded-xl bg-red-950/20 border border-red-900/40 text-red-400 text-xs flex items-center gap-2">
-                          <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                          <span>{utrError}</span>
-                        </div>
-                      )}
-
-                      {utrSuccessMsg && (
-                        <div className="p-3 rounded-xl bg-emerald-950/20 border border-emerald-900/40 text-emerald-400 text-xs flex items-center gap-2">
-                          <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-                          <span>{utrSuccessMsg}</span>
-                        </div>
-                      )}
-
-                      <button
-                        type="submit"
-                        disabled={isSubmittingUtr}
-                        className="w-full py-4 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm transition-all duration-200 shadow-[0_0_25px_rgba(249,115,22,0.4)] hover:shadow-[0_0_35px_rgba(249,115,22,0.6)] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-                      >
-                        <Send className="w-4 h-4" />
-                        <span>{isSubmittingUtr ? "Submitting UTR Reference..." : "Submit UTR for Verification"}</span>
-                      </button>
-                    </form>
+                {/* UTR Input Form */}
+                <form onSubmit={handleSubmitUtr} className="mt-5 space-y-4">
+                  <div>
+                    <label className="block text-xs font-mono uppercase tracking-wider text-orange-400 font-bold mb-2">
+                      Enter 12-Digit UPI Transaction Reference (UTR)
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={utrInput}
+                      onChange={(e) => setUtrInput(e.target.value)}
+                      placeholder="E.g., 430981928410"
+                      className="w-full bg-[#18181b] border border-[#27272a] text-white text-sm rounded-xl px-4 py-3 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-all font-mono tracking-wider placeholder:text-zinc-600"
+                    />
                   </div>
-                )}
 
+                  {utrError && (
+                    <div className="p-3 rounded-xl bg-red-950/20 border border-red-900/40 text-red-400 text-xs flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                      <span>{utrError}</span>
+                    </div>
+                  )}
+
+                  {utrSuccessMsg && (
+                    <div className="p-3 rounded-xl bg-emerald-950/20 border border-emerald-900/40 text-emerald-400 text-xs flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                      <span>{utrSuccessMsg}</span>
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={isSubmittingUtr}
+                    className="w-full py-4 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm transition-all duration-200 shadow-[0_0_25px_rgba(249,115,22,0.4)] hover:shadow-[0_0_35px_rgba(249,115,22,0.6)] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    <Send className="w-4 h-4" />
+                    <span>{isSubmittingUtr ? "Submitting UTR Reference..." : "Submit UTR for Verification"}</span>
+                  </button>
+                </form>
               </div>
             )}
 
