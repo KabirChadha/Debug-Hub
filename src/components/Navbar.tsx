@@ -87,18 +87,6 @@ export function Navbar() {
                 </span>
               </div>
             </Link>
-
-            {/* Engineers Online Status Pill */}
-            <div className="hidden xl:flex items-center gap-2 ml-4 px-3 py-1.5 rounded-full bg-[#18181b] border border-[#27272a] text-xs">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-              </span>
-              <span className="font-medium text-zinc-200">
-                <span className="text-emerald-400 font-semibold mr-1">🟢 Engineers Online</span>
-                <span className="text-zinc-500">| 14 on shift</span>
-              </span>
-            </div>
           </div>
 
           {/* Center/Right: Search + Auth + CTA */}
@@ -175,13 +163,7 @@ export function Navbar() {
 
         {/* Mobile secondary indicator bar */}
         <div className="md:hidden flex items-center justify-between px-4 py-1.5 bg-[#18181b]/50 border-t border-[#27272a]/60 text-[11px]">
-          <div className="flex items-center gap-2">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-            </span>
-            <span className="text-emerald-400 font-medium">🟢 Engineers Online</span>
-          </div>
+          <span className="text-zinc-400 font-mono text-[10px]">Runtime Assurance Protocol</span>
           <button
             onClick={() => setIsTrackerOpen(true)}
             className="text-orange-400 hover:underline font-mono text-[11px]"

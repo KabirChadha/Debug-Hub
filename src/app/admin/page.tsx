@@ -98,6 +98,7 @@ function AdminDashboardContent() {
   const [downloadingOrderId, setDownloadingOrderId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [selectedService, setSelectedService] = useState<"all" | "bug_fix" | "custom_project">("all");
 
   // Dynamic Quote states
   const [quoteInputs, setQuoteInputs] = useState<Record<string, string>>({});
@@ -740,39 +741,345 @@ function AdminDashboardContent() {
     }
   };
 
-  // Filtered orders list
+  // High-level service counts
+  const bugFixCount = orders.filter((o) => !o.service_type || o.service_type === "bug_fix").length;
+  const customProjectCount = orders.filter((o) => o.service_type === "custom_project").length;
+
+  // Filtered orders list (Service filter + Search + Status sub-filter)
   const filteredOrders = orders.filter((o) => {
+    // 1. Service filter
+    if (selectedService === "bug_fix") {
+      if (o.service_type && o.service_type !== "bug_fix") return false;
+    } else if (selectedService === "custom_project") {
+      if (o.service_type !== "custom_project") return false;
+    }
+
+    // 2. Search query filter
     const matchesSearch =
       o.order_code.toLowerCase().includes(searchQuery.toLowerCase()) ||
       o.contact_handle.toLowerCase().includes(searchQuery.toLowerCase()) ||
       o.tech_stack.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (o.user_email && o.user_email.toLowerCase().includes(searchQuery.toLowerCase())) ||
       (o.utr_number && o.utr_number.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (o.project_title && o.project_title.toLowerCase().includes(searchQuery.toLowerCase()));
+      (o.project_title && o.project_title.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (o.requirements && o.requirements.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (o.issue_description && o.issue_description.toLowerCase().includes(searchQuery.toLowerCase()));
 
+    if (!matchesSearch) return false;
+
+    // 3. Status filter
     if (statusFilter === "verifying_payment") {
-      return matchesSearch && o.payment_status === "verifying";
+      return o.payment_status === "verifying";
     }
 
     if (statusFilter === "needs_quote") {
-      return matchesSearch && (o.quoted_price === null || o.quoted_price === undefined || o.payment_status === "unquoted");
+      return o.quoted_price === null || o.quoted_price === undefined || o.payment_status === "unquoted";
     }
 
     const matchesStatus = statusFilter === "all" || o.status === statusFilter;
 
-    return matchesSearch && matchesStatus;
+    return matchesStatus;
   });
 
-  // Calculate quick stats
+  // Calculate quick stats scoped to the selected service tab
+  const serviceScopedOrders = orders.filter((o) => {
+    if (selectedService === "bug_fix") {
+      return !o.service_type || o.service_type === "bug_fix";
+    }
+    if (selectedService === "custom_project") {
+      return o.service_type === "custom_project";
+    }
+    return true;
+  });
+
   const stats = {
-    total: orders.length,
-    submitted: orders.filter((o) => o.status === "submitted").length,
-    in_progress: orders.filter((o) => o.status === "in_progress").length,
-    proof_ready: orders.filter((o) => o.status === "proof_ready").length,
-    completed: orders.filter((o) => o.status === "completed").length,
-    pending_utr: orders.filter((o) => o.payment_status === "verifying").length,
-    needs_quote: orders.filter((o) => o.quoted_price === null || o.quoted_price === undefined || o.payment_status === "unquoted").length,
+    total: serviceScopedOrders.length,
+    submitted: serviceScopedOrders.filter((o) => o.status === "submitted").length,
+    in_progress: serviceScopedOrders.filter((o) => o.status === "in_progress").length,
+    proof_ready: serviceScopedOrders.filter((o) => o.status === "proof_ready").length,
+    completed: serviceScopedOrders.filter((o) => o.status === "completed").length,
+    pending_utr: serviceScopedOrders.filter((o) => o.payment_status === "verifying").length,
+    needs_quote: serviceScopedOrders.filter((o) => o.quoted_price === null || o.quoted_price === undefined || o.payment_status === "unquoted").length,
   };
+
+  // Helper: Status badge
+  const renderStatusBadge = (status: string) => {
+    switch (status) {
+      case "submitted":
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 whitespace-nowrap">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+            Submitted
+          </span>
+        );
+      case "quote_ready":
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-blue-500/10 text-blue-400 border border-blue-500/30 whitespace-nowrap">
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+            Quote Ready
+          </span>
+        );
+      case "in_progress":
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-orange-500/10 text-orange-400 border border-orange-500/30 whitespace-nowrap animate-pulse">
+            <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
+            In Progress
+          </span>
+        );
+      case "proof_ready":
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 whitespace-nowrap">
+            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+            Proof Ready
+          </span>
+        );
+      case "completed":
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 whitespace-nowrap">
+            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+            Completed
+          </span>
+        );
+      default:
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono text-zinc-400 border border-zinc-700">
+            {status}
+          </span>
+        );
+    }
+  };
+
+  // Helper: File cell with dynamic badge and download
+  const renderFileCell = (order: Order, isCustomProject: boolean) => {
+    const rawFileName =
+      order.file_name ||
+      (order.file_storage_path || order.intake_file_path || order.zip_storage_path || "").split("/").pop();
+
+    if (!rawFileName && isCustomProject) {
+      return (
+        <span className="text-[11px] font-mono text-zinc-600 italic block">
+          No syllabus/doc
+        </span>
+      );
+    }
+
+    const fileName = rawFileName || `client-intake-${order.order_code}.zip`;
+    const { badge, style } = getAdminFileBadge(fileName);
+    const isDownloading = downloadingOrderId === (order.id || order.order_code);
+
+    return (
+      <div className="flex flex-col gap-1 items-start min-w-[130px]">
+        <div className="flex items-center gap-1.5 max-w-[180px]" title={fileName}>
+          <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border ${style}`}>
+            {badge}
+          </span>
+          <span className="text-xs text-white font-mono truncate font-medium">
+            {fileName}
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={() => handleDownloadIntake(order)}
+          disabled={isDownloading}
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#09090b] hover:bg-zinc-800 text-orange-400 border border-[#27272a] hover:border-orange-500/40 text-[10px] font-mono transition-colors whitespace-nowrap cursor-pointer disabled:opacity-50"
+          title={`Download ${fileName}`}
+        >
+          {isDownloading ? (
+            <RefreshCw className="w-3 h-3 text-orange-400 animate-spin" />
+          ) : (
+            <Download className="w-3 h-3 text-orange-400" />
+          )}
+          <span>{isDownloading ? "Downloading..." : "Download"}</span>
+        </button>
+      </div>
+    );
+  };
+
+  // Helper: Payment and Quote input cell
+  const renderPaymentQuoteCell = (order: Order) => {
+    const isUnquoted =
+      order.quoted_price === null ||
+      order.quoted_price === undefined ||
+      order.payment_status === "unquoted";
+    const isEditing = editingQuoteCodes[order.order_code];
+
+    return (
+      <div className="flex flex-col gap-1.5 items-start">
+        {/* If unquoted or currently editing quote */}
+        {isUnquoted || isEditing ? (
+          <div className="flex items-center gap-1">
+            <input
+              type="number"
+              placeholder="Quote ₹"
+              value={
+                quoteInputs[order.order_code] !== undefined
+                  ? quoteInputs[order.order_code]
+                  : order.quoted_price
+                  ? String(order.quoted_price)
+                  : ""
+              }
+              onChange={(e) =>
+                setQuoteInputs((prev) => ({
+                  ...prev,
+                  [order.order_code]: e.target.value,
+                }))
+              }
+              className="w-20 bg-[#09090b] border border-orange-500/40 text-white text-xs px-2 py-1 rounded font-mono focus:outline-none focus:border-orange-500"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const val =
+                  quoteInputs[order.order_code] !== undefined
+                    ? Number(quoteInputs[order.order_code])
+                    : order.quoted_price || 0;
+                handleSetQuote(order.order_code, val);
+              }}
+              disabled={isSendingQuote[order.order_code]}
+              className="px-2 py-1 rounded bg-orange-500 hover:bg-orange-600 text-white font-bold text-[10px] cursor-pointer disabled:opacity-50 whitespace-nowrap shadow-[0_0_10px_rgba(249,115,22,0.3)]"
+            >
+              {isSendingQuote[order.order_code] ? "Sending..." : "Send Quote"}
+            </button>
+            {isEditing && (
+              <button
+                type="button"
+                onClick={() =>
+                  setEditingQuoteCodes((prev) => ({
+                    ...prev,
+                    [order.order_code]: false,
+                  }))
+                }
+                className="text-zinc-500 hover:text-white p-0.5 text-xs cursor-pointer"
+                title="Cancel"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {order.payment_status === "approved" ? (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 whitespace-nowrap">
+                <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                Approved (₹{order.quoted_price})
+              </span>
+            ) : order.payment_status === "verifying" ? (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30 whitespace-nowrap animate-pulse">
+                <Clock className="w-3 h-3 text-amber-400" />
+                Verifying UTR (₹{order.quoted_price})
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-zinc-800 text-zinc-300 border border-zinc-700 whitespace-nowrap">
+                Quoted: ₹{order.quoted_price}
+              </span>
+            )}
+
+            {order.payment_status !== "approved" && (
+              <button
+                type="button"
+                onClick={() => {
+                  setQuoteInputs((prev) => ({
+                    ...prev,
+                    [order.order_code]: String(order.quoted_price || ""),
+                  }));
+                  setEditingQuoteCodes((prev) => ({
+                    ...prev,
+                    [order.order_code]: true,
+                  }));
+                }}
+                className="text-zinc-500 hover:text-orange-400 text-[10px] font-mono underline ml-0.5 cursor-pointer"
+                title="Adjust quote"
+              >
+                Edit
+              </button>
+            )}
+          </div>
+        )}
+
+        {order.utr_number ? (
+          <div className="font-mono text-[11px] text-zinc-300">
+            <span className="text-zinc-500 text-[10px]">UTR: </span>
+            <span className="font-bold text-amber-300 select-all" title="Submitted UTR Number">
+              {order.utr_number}
+            </span>
+          </div>
+        ) : (
+          <span className="font-mono text-[10px] text-zinc-600 block">No UTR</span>
+        )}
+      </div>
+    );
+  };
+
+  // Helper: Action buttons per row
+  const renderRowActions = (order: Order) => (
+    <div className="inline-flex items-center gap-1.5 justify-end">
+      {/* APPROVE PAYMENT BUTTON */}
+      {order.payment_status !== "approved" && (
+        <button
+          onClick={() => handleApprovePayment(order.id, order.order_code)}
+          className="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-black border border-emerald-400 text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 whitespace-nowrap shadow-[0_0_12px_rgba(16,185,129,0.3)]"
+          title="Approve payment and unlock client downloads"
+        >
+          <CheckCheck className="w-3.5 h-3.5" />
+          <span>Approve Payment</span>
+        </button>
+      )}
+
+      {/* WHATSAPP DIRECT BUTTON */}
+      <a
+        href={`https://wa.me/919289942337?text=Hi%2C%20regarding%20your%20CampusCodeFix%20order%20${encodeURIComponent(order.order_code)}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="px-2.5 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/40 text-[11px] font-semibold transition-all cursor-pointer flex items-center gap-1 whitespace-nowrap"
+        title="Chat with student on WhatsApp"
+      >
+        <MessageSquare className="w-3 h-3 text-emerald-400" />
+        <span>WhatsApp</span>
+      </a>
+
+      {/* Action: Set to In Progress */}
+      {order.status === "submitted" && (
+        <button
+          onClick={() => handleSetInProgress(order.order_code)}
+          className="px-2.5 py-1 rounded-lg bg-orange-500/10 hover:bg-orange-500 text-orange-400 hover:text-white border border-orange-500/30 text-[11px] font-semibold transition-all cursor-pointer whitespace-nowrap"
+          title="Assign to active debugging sandbox"
+        >
+          Set to In Progress
+        </button>
+      )}
+
+      {/* Action: Upload Proof Video */}
+      <button
+        onClick={() => openUploadModal(order, "video")}
+        className="px-2.5 py-1 rounded-lg bg-[#09090b] hover:bg-zinc-800 text-zinc-200 border border-[#27272a] hover:border-cyan-500/40 text-[11px] font-semibold transition-all cursor-pointer flex items-center gap-1 whitespace-nowrap"
+        title="Upload verified execution MP4/WebM"
+      >
+        <Video className="w-3 h-3 text-cyan-400" />
+        <span>{order.proof_video_url ? "Reupload Video" : "Upload Proof Video"}</span>
+      </button>
+
+      {/* Action: Upload Fixed Solution */}
+      <button
+        onClick={() => openUploadModal(order, "fixed_zip")}
+        className="px-2.5 py-1 rounded-lg bg-[#09090b] hover:bg-zinc-800 text-zinc-200 border border-[#27272a] hover:border-orange-500/40 text-[11px] font-semibold transition-all cursor-pointer flex items-center gap-1 whitespace-nowrap"
+        title="Upload fixed solution (.zip) to deliverables bucket"
+      >
+        <FileArchive className="w-3 h-3 text-orange-400" />
+        <span>{order.fixed_zip_url ? "Reupload Solution" : "Upload Solution"}</span>
+      </button>
+
+      {/* Action: Mark Completed */}
+      {order.status !== "completed" && (
+        <button
+          onClick={() => handleMarkCompleted(order.order_code)}
+          className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white border border-[#27272a] text-[11px] font-medium transition-all cursor-pointer flex items-center gap-1 whitespace-nowrap"
+          title="Unlocks client download page at /order/[code]"
+        >
+          <span>Complete</span>
+        </button>
+      )}
+    </div>
+  );
 
   // --------------------------------------------------------------------------
   // 0. HYDRATION GUARD (Loading skeleton until client mount)
@@ -954,6 +1261,80 @@ function AdminDashboardContent() {
           </div>
         </div>
 
+        {/* High-Level Service Tabs */}
+        <div className="flex flex-wrap items-center justify-between gap-3 p-2 rounded-2xl bg-[#18181b] border border-[#27272a] shadow-lg">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedService("all")}
+              className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-mono font-bold transition-all flex items-center gap-2.5 cursor-pointer ${
+                selectedService === "all"
+                  ? "bg-orange-500 text-white shadow-[0_0_15px_rgba(249,115,22,0.4)]"
+                  : "text-zinc-400 hover:text-white hover:bg-[#09090b] border border-transparent"
+              }`}
+            >
+              <span>All Submissions</span>
+              <span
+                className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-bold ${
+                  selectedService === "all"
+                    ? "bg-black/30 text-white"
+                    : "bg-[#09090b] text-zinc-400 border border-[#27272a]"
+                }`}
+              >
+                {orders.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSelectedService("bug_fix")}
+              className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-mono font-bold transition-all flex items-center gap-2.5 cursor-pointer ${
+                selectedService === "bug_fix"
+                  ? "bg-sky-500 text-white shadow-[0_0_15px_rgba(14,165,233,0.4)]"
+                  : "text-zinc-400 hover:text-white hover:bg-[#09090b] border border-transparent"
+              }`}
+            >
+              <span>🛠️ Bug Fixes</span>
+              <span
+                className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-bold ${
+                  selectedService === "bug_fix"
+                    ? "bg-black/30 text-white"
+                    : "bg-[#09090b] text-sky-400 border border-sky-500/30"
+                }`}
+              >
+                {bugFixCount}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSelectedService("custom_project")}
+              className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-mono font-bold transition-all flex items-center gap-2.5 cursor-pointer ${
+                selectedService === "custom_project"
+                  ? "bg-purple-500 text-white shadow-[0_0_15px_rgba(168,85,247,0.4)]"
+                  : "text-zinc-400 hover:text-white hover:bg-[#09090b] border border-transparent"
+              }`}
+            >
+              <span>🚀 New Projects / Builds</span>
+              <span
+                className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-bold ${
+                  selectedService === "custom_project"
+                    ? "bg-black/30 text-white"
+                    : "bg-[#09090b] text-purple-400 border border-purple-500/30"
+                }`}
+              >
+                {customProjectCount}
+              </span>
+            </button>
+          </div>
+
+          <div className="text-[11px] font-mono text-zinc-500 hidden sm:block pr-3">
+            {selectedService === "bug_fix" && "Prioritizing: Error Logs • Code Files • 1-2 Hr SLA Handover"}
+            {selectedService === "custom_project" && "Prioritizing: Specifications • Syllabus Scope • Quoting"}
+            {selectedService === "all" && "Displaying consolidated engineering dispatch queue"}
+          </div>
+        </div>
+
         {/* Filter & Search Controls */}
         <div className="p-4 rounded-2xl bg-[#18181b] border border-[#27272a] flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
           {/* Search bar */}
@@ -1014,31 +1395,221 @@ function AdminDashboardContent() {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
-                <tr className="border-b border-[#27272a] bg-[#09090b]/80 text-zinc-400 font-mono uppercase text-[11px] tracking-wider">
-                  <th className="py-3.5 px-4">Order Code</th>
-                  <th className="py-3.5 px-4">Client / Student Email</th>
-                  <th className="py-3.5 px-4">Tech Stack</th>
-                  <th className="py-3.5 px-4">Issue Description / Specs</th>
-                  <th className="py-3.5 px-4">Status</th>
-                  <th className="py-3.5 px-4 min-w-[190px]">Payment &amp; Quote</th>
-                  <th className="py-3.5 px-4">Submitted</th>
-                  <th className="py-3.5 px-4 min-w-[170px]">INTAKE FILE</th>
-                  <th className="py-3.5 px-4 text-right">Actions</th>
-                </tr>
+                {selectedService === "bug_fix" ? (
+                  <tr className="border-b border-[#27272a] bg-[#09090b]/80 text-zinc-400 font-mono uppercase text-[11px] tracking-wider">
+                    <th className="py-3.5 px-4">Order &amp; Student</th>
+                    <th className="py-3.5 px-4 min-w-[200px]">Reported Issue / Bug</th>
+                    <th className="py-3.5 px-4 min-w-[160px]">Attached Code File</th>
+                    <th className="py-3.5 px-4">Tech Stack</th>
+                    <th className="py-3.5 px-4">SLA &amp; Status</th>
+                    <th className="py-3.5 px-4 min-w-[170px]">Payment &amp; UTR</th>
+                    <th className="py-3.5 px-4 text-right">Actions</th>
+                  </tr>
+                ) : selectedService === "custom_project" ? (
+                  <tr className="border-b border-[#27272a] bg-[#09090b]/80 text-zinc-400 font-mono uppercase text-[11px] tracking-wider">
+                    <th className="py-3.5 px-4 min-w-[190px]">Project Title &amp; Code</th>
+                    <th className="py-3.5 px-4">Client / Student Email</th>
+                    <th className="py-3.5 px-4">Tech Stack</th>
+                    <th className="py-3.5 px-4 min-w-[220px]">Requirements &amp; Specs</th>
+                    <th className="py-3.5 px-4 min-w-[160px]">Syllabus / Reference Docs</th>
+                    <th className="py-3.5 px-4">Status</th>
+                    <th className="py-3.5 px-4 min-w-[190px]">Quoted Price &amp; Status</th>
+                    <th className="py-3.5 px-4 text-right">Actions</th>
+                  </tr>
+                ) : (
+                  <tr className="border-b border-[#27272a] bg-[#09090b]/80 text-zinc-400 font-mono uppercase text-[11px] tracking-wider">
+                    <th className="py-3.5 px-4">Order Code &amp; Service</th>
+                    <th className="py-3.5 px-4">Client / Student Email</th>
+                    <th className="py-3.5 px-4">Tech Stack</th>
+                    <th className="py-3.5 px-4">Issue Description / Specs</th>
+                    <th className="py-3.5 px-4">Status</th>
+                    <th className="py-3.5 px-4 min-w-[190px]">Payment &amp; Quote</th>
+                    <th className="py-3.5 px-4 min-w-[160px]">INTAKE FILE / DOC</th>
+                    <th className="py-3.5 px-4 text-right">Actions</th>
+                  </tr>
+                )}
               </thead>
               <tbody className="divide-y divide-[#27272a]/70">
                 {filteredOrders.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="py-12 text-center text-zinc-500 font-mono text-xs">
-                      No active orders found matching your criteria.
+                    <td
+                      colSpan={selectedService === "bug_fix" ? 7 : 8}
+                      className="py-12 text-center text-zinc-500 font-mono text-xs"
+                    >
+                      {selectedService === "bug_fix"
+                        ? "No bug fix tickets found matching your criteria."
+                        : selectedService === "custom_project"
+                        ? "No custom project build tickets found matching your criteria."
+                        : "No active orders found matching your criteria."}
                     </td>
                   </tr>
                 ) : (
                   filteredOrders.map((order) => {
+                    // TAB 1: BUG FIX SPECIFIC VIEW
+                    if (selectedService === "bug_fix") {
+                      return (
+                        <tr key={order.id || order.order_code} className="hover:bg-[#09090b]/40 transition-colors">
+                          {/* Order & Student */}
+                          <td className="py-4 px-4 font-mono">
+                            <div className="flex flex-col gap-1 items-start">
+                              <div className="flex items-center gap-1.5">
+                                <Link
+                                  href={`/order/${order.order_code}`}
+                                  target="_blank"
+                                  className="font-bold text-orange-400 hover:text-orange-300 hover:underline flex items-center gap-1"
+                                  title="Open Client View"
+                                >
+                                  <span>{order.order_code}</span>
+                                  <ExternalLink className="w-3 h-3 text-zinc-500" />
+                                </Link>
+                                <span className="bg-sky-500/15 text-sky-400 border border-sky-500/30 font-bold px-1.5 py-0.2 rounded text-[9px]">
+                                  [Bug Fix]
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1 text-zinc-300">
+                                <MessageSquare className="w-3 h-3 text-zinc-500 flex-shrink-0" />
+                                <span className="font-semibold text-white text-[11px]">{order.contact_handle}</span>
+                              </div>
+                              {order.user_email && (
+                                <span className="text-[10px] text-zinc-500 truncate max-w-[140px]" title={order.user_email}>
+                                  {order.user_email}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Reported Issue / Bug */}
+                          <td className="py-4 px-4 max-w-sm">
+                            <div className="p-2.5 rounded-xl bg-[#09090b] border border-[#27272a] shadow-inner">
+                              <p className="text-zinc-300 font-mono text-[11px] line-clamp-2 leading-relaxed" title={order.issue_description}>
+                                <span className="text-orange-400 font-bold mr-1">$</span>
+                                {order.issue_description || "No crash details provided"}
+                              </p>
+                            </div>
+                          </td>
+
+                          {/* Attached Code File */}
+                          <td className="py-4 px-4">
+                            {renderFileCell(order, false)}
+                          </td>
+
+                          {/* Tech Stack */}
+                          <td className="py-4 px-4">
+                            <span className="inline-block px-2.5 py-1 rounded bg-[#09090b] border border-[#27272a] text-zinc-300 font-mono text-[11px] whitespace-nowrap">
+                              {order.tech_stack}
+                            </span>
+                          </td>
+
+                          {/* SLA & Status */}
+                          <td className="py-4 px-4">
+                            <div className="flex flex-col gap-1 items-start">
+                              <span className="text-[10px] font-mono text-orange-400 font-semibold bg-orange-500/10 border border-orange-500/20 px-2 py-0.5 rounded">
+                                ⚡ 1–2 Hr Triage
+                              </span>
+                              {renderStatusBadge(order.status)}
+                            </div>
+                          </td>
+
+                          {/* Payment & UTR */}
+                          <td className="py-4 px-4">
+                            {renderPaymentQuoteCell(order)}
+                          </td>
+
+                          {/* Actions */}
+                          <td className="py-4 px-4 text-right">
+                            {renderRowActions(order)}
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    // TAB 2: CUSTOM PROJECT BUILD SPECIFIC VIEW
+                    if (selectedService === "custom_project") {
+                      return (
+                        <tr key={order.id || order.order_code} className="hover:bg-[#09090b]/40 transition-colors">
+                          {/* Project Title & Code */}
+                          <td className="py-4 px-4 font-mono">
+                            <div className="flex flex-col gap-1 items-start">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="bg-purple-500/15 text-purple-400 border border-purple-500/30 font-bold px-1.5 py-0.2 rounded text-[9px] font-mono">
+                                  [New Project]
+                                </span>
+                                <Link
+                                  href={`/order/${order.order_code}`}
+                                  target="_blank"
+                                  className="font-bold text-orange-400 hover:text-orange-300 hover:underline flex items-center gap-1 text-xs"
+                                  title="Open Client View"
+                                >
+                                  <span>#{order.order_code}</span>
+                                  <ExternalLink className="w-3 h-3 text-zinc-500" />
+                                </Link>
+                              </div>
+                              <h4 className="text-xs font-bold text-white font-mono mt-0.5 max-w-[200px] truncate" title={order.project_title || "Custom Project Build"}>
+                                {order.project_title || "Custom Project Build"}
+                              </h4>
+                            </div>
+                          </td>
+
+                          {/* Client / Student Email */}
+                          <td className="py-4 px-4 font-mono text-zinc-300">
+                            <div className="flex flex-col gap-0.5">
+                              <div className="flex items-center gap-1.5">
+                                <MessageSquare className="w-3.5 h-3.5 text-zinc-500 flex-shrink-0" />
+                                <span className="font-semibold text-white">{order.contact_handle}</span>
+                              </div>
+                              {order.user_email ? (
+                                <span className="text-[10px] text-zinc-400 truncate max-w-[160px]" title={order.user_email}>
+                                  {order.user_email}
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-zinc-600">Guest Order</span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Tech Stack */}
+                          <td className="py-4 px-4">
+                            <span className="inline-block px-2.5 py-1 rounded bg-[#09090b] border border-purple-500/30 text-purple-300 font-mono text-[11px] whitespace-nowrap">
+                              {order.tech_stack}
+                            </span>
+                          </td>
+
+                          {/* Requirements & Specifications */}
+                          <td className="py-4 px-4 max-w-sm">
+                            <div className="p-2.5 rounded-xl bg-[#09090b] border border-[#27272a] shadow-inner">
+                              <p className="text-zinc-300 font-mono text-[11px] line-clamp-3 leading-relaxed" title={order.requirements || order.issue_description}>
+                                {order.requirements || order.issue_description || "No specifications recorded"}
+                              </p>
+                            </div>
+                          </td>
+
+                          {/* Syllabus / Reference Docs */}
+                          <td className="py-4 px-4">
+                            {renderFileCell(order, true)}
+                          </td>
+
+                          {/* Status */}
+                          <td className="py-4 px-4">
+                            {renderStatusBadge(order.status)}
+                          </td>
+
+                          {/* Quoted Price & Status */}
+                          <td className="py-4 px-4">
+                            {renderPaymentQuoteCell(order)}
+                          </td>
+
+                          {/* Actions */}
+                          <td className="py-4 px-4 text-right">
+                            {renderRowActions(order)}
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    // TAB 3: ALL SUBMISSIONS (CONSOLIDATED VIEW)
                     return (
                       <tr key={order.id || order.order_code} className="hover:bg-[#09090b]/40 transition-colors">
-                        
-                        {/* Order Code & Service Type Badge */}
+                        {/* Order Code & Service */}
                         <td className="py-4 px-4 font-mono">
                           <div className="flex flex-col gap-1 items-start">
                             <Link
@@ -1070,7 +1641,7 @@ function AdminDashboardContent() {
                           </div>
                         </td>
 
-                        {/* Client Handle & Student Email */}
+                        {/* Client / Student Email */}
                         <td className="py-4 px-4 font-mono text-zinc-300">
                           <div className="flex flex-col gap-0.5">
                             <div className="flex items-center gap-1.5">
@@ -1101,261 +1672,25 @@ function AdminDashboardContent() {
                           </p>
                         </td>
 
-                        {/* Status Badge */}
+                        {/* Status */}
                         <td className="py-4 px-4">
-                          {order.status === "submitted" && (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 whitespace-nowrap">
-                              <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                              Submitted
-                            </span>
-                          )}
-                          {order.status === "quote_ready" && (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-blue-500/10 text-blue-400 border border-blue-500/30 whitespace-nowrap">
-                              <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
-                              Quote Ready
-                            </span>
-                          )}
-                          {order.status === "in_progress" && (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-orange-500/10 text-orange-400 border border-orange-500/30 whitespace-nowrap animate-pulse">
-                              <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
-                              In Progress
-                            </span>
-                          )}
-                          {order.status === "proof_ready" && (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 whitespace-nowrap">
-                              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
-                              Proof Ready
-                            </span>
-                          )}
-                          {order.status === "completed" && (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 whitespace-nowrap">
-                              <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                              Completed
-                            </span>
-                          )}
+                          {renderStatusBadge(order.status)}
                         </td>
 
-                        {/* Payment Status, Quote & Submitted UTR */}
+                        {/* Payment & Quote */}
                         <td className="py-4 px-4">
-                          <div className="flex flex-col gap-1.5 items-start">
-                            {/* If unquoted or currently editing quote */}
-                            {(order.quoted_price === null || order.quoted_price === undefined || order.payment_status === "unquoted" || editingQuoteCodes[order.order_code]) ? (
-                              <div className="flex items-center gap-1">
-                                <input
-                                  type="number"
-                                  placeholder="Quote ₹"
-                                  value={
-                                    quoteInputs[order.order_code] !== undefined
-                                      ? quoteInputs[order.order_code]
-                                      : (order.quoted_price ? String(order.quoted_price) : "")
-                                  }
-                                  onChange={(e) =>
-                                    setQuoteInputs((prev) => ({
-                                      ...prev,
-                                      [order.order_code]: e.target.value,
-                                    }))
-                                  }
-                                  className="w-20 bg-[#09090b] border border-orange-500/40 text-white text-xs px-2 py-1 rounded font-mono focus:outline-none focus:border-orange-500"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const val = quoteInputs[order.order_code] !== undefined 
-                                      ? Number(quoteInputs[order.order_code]) 
-                                      : (order.quoted_price || 0);
-                                    handleSetQuote(order.order_code, val);
-                                  }}
-                                  disabled={isSendingQuote[order.order_code]}
-                                  className="px-2 py-1 rounded bg-orange-500 hover:bg-orange-600 text-white font-bold text-[10px] cursor-pointer disabled:opacity-50 whitespace-nowrap shadow-[0_0_10px_rgba(249,115,22,0.3)]"
-                                >
-                                  {isSendingQuote[order.order_code] ? "Sending..." : "Send Quote"}
-                                </button>
-                                {editingQuoteCodes[order.order_code] && (
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setEditingQuoteCodes((prev) => ({
-                                        ...prev,
-                                        [order.order_code]: false,
-                                      }))
-                                    }
-                                    className="text-zinc-500 hover:text-white p-0.5 text-xs cursor-pointer"
-                                    title="Cancel"
-                                  >
-                                    ✕
-                                  </button>
-                                )}
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                {order.payment_status === "approved" ? (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 whitespace-nowrap">
-                                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                                    Approved (₹{order.quoted_price})
-                                  </span>
-                                ) : order.payment_status === "verifying" ? (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30 whitespace-nowrap animate-pulse">
-                                    <Clock className="w-3 h-3 text-amber-400" />
-                                    Verifying UTR (₹{order.quoted_price})
-                                  </span>
-                                ) : (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-zinc-800 text-zinc-300 border border-zinc-700 whitespace-nowrap">
-                                    Quoted: ₹{order.quoted_price}
-                                  </span>
-                                )}
-
-                                {order.payment_status !== "approved" && (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setQuoteInputs((prev) => ({
-                                        ...prev,
-                                        [order.order_code]: String(order.quoted_price || ""),
-                                      }));
-                                      setEditingQuoteCodes((prev) => ({
-                                        ...prev,
-                                        [order.order_code]: true,
-                                      }));
-                                    }}
-                                    className="text-zinc-500 hover:text-orange-400 text-[10px] font-mono underline ml-0.5 cursor-pointer"
-                                    title="Adjust quote"
-                                  >
-                                    Edit
-                                  </button>
-                                )}
-                              </div>
-                            )}
-
-                            {order.utr_number ? (
-                              <div className="font-mono text-[11px] text-zinc-300">
-                                <span className="text-zinc-500 text-[10px]">UTR: </span>
-                                <span className="font-bold text-amber-300 select-all" title="Submitted UTR Number">
-                                  {order.utr_number}
-                                </span>
-                              </div>
-                            ) : (
-                              <span className="font-mono text-[10px] text-zinc-600 block">No UTR</span>
-                            )}
-                          </div>
-                        </td>
-
-                        {/* Timestamp */}
-                        <td className="py-4 px-4 text-zinc-400 font-mono text-[11px] whitespace-nowrap">
-                          {order.created_at ? new Date(order.created_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "Recently"}
+                          {renderPaymentQuoteCell(order)}
                         </td>
 
                         {/* Direct Download Client File with Format Badge */}
                         <td className="py-4 px-4">
-                          {(() => {
-                            const fileName =
-                              order.file_name ||
-                              (order.file_storage_path || order.intake_file_path || order.zip_storage_path || "").split("/").pop() ||
-                              `client-intake-${order.order_code}.zip`;
-                            const { badge, style } = getAdminFileBadge(fileName);
-                            const isDownloading = downloadingOrderId === (order.id || order.order_code);
-
-                            return (
-                              <div className="flex flex-col gap-1 items-start min-w-[130px]">
-                                <div className="flex items-center gap-1.5 max-w-[180px]" title={fileName}>
-                                  <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border ${style}`}>
-                                    {badge}
-                                  </span>
-                                  <span className="text-xs text-white font-mono truncate font-medium">
-                                    {fileName}
-                                  </span>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => handleDownloadIntake(order)}
-                                  disabled={isDownloading}
-                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#09090b] hover:bg-zinc-800 text-orange-400 border border-[#27272a] hover:border-orange-500/40 text-[10px] font-mono transition-colors whitespace-nowrap cursor-pointer disabled:opacity-50"
-                                  title={`Download ${fileName}`}
-                                >
-                                  {isDownloading ? (
-                                    <RefreshCw className="w-3 h-3 text-orange-400 animate-spin" />
-                                  ) : (
-                                    <Download className="w-3 h-3 text-orange-400" />
-                                  )}
-                                  <span>{isDownloading ? "Downloading..." : "Download"}</span>
-                                </button>
-                              </div>
-                            );
-                          })()}
+                          {renderFileCell(order, order.service_type === "custom_project")}
                         </td>
 
                         {/* ACTION BUTTONS PER ROW */}
                         <td className="py-4 px-4 text-right">
-                          <div className="inline-flex items-center gap-1.5 justify-end">
-                            
-                            {/* APPROVE PAYMENT BUTTON: sets payment_status='approved' & status='completed' */}
-                            {order.payment_status !== "approved" && (
-                              <button
-                                onClick={() => handleApprovePayment(order.id, order.order_code)}
-                                className="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-black border border-emerald-400 text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 whitespace-nowrap shadow-[0_0_12px_rgba(16,185,129,0.3)]"
-                                title="Approve payment and unlock client downloads"
-                              >
-                                <CheckCheck className="w-3.5 h-3.5" />
-                                <span>Approve Payment</span>
-                              </button>
-                            )}
-
-                            {/* WHATSAPP DIRECT BUTTON */}
-                            <a
-                              href={`https://wa.me/919289942337?text=Hi%2C%20regarding%20your%20CampusCodeFix%20order%20${encodeURIComponent(order.order_code)}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="px-2.5 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/40 text-[11px] font-semibold transition-all cursor-pointer flex items-center gap-1 whitespace-nowrap"
-                              title="Chat with student on WhatsApp"
-                            >
-                              <MessageSquare className="w-3 h-3 text-emerald-400" />
-                              <span>WhatsApp</span>
-                            </a>
-
-                            {/* Action 1: Set to In Progress */}
-                            {order.status === "submitted" && (
-                              <button
-                                onClick={() => handleSetInProgress(order.order_code)}
-                                className="px-2.5 py-1 rounded-lg bg-orange-500/10 hover:bg-orange-500 text-orange-400 hover:text-white border border-orange-500/30 text-[11px] font-semibold transition-all cursor-pointer whitespace-nowrap"
-                                title="Assign to active debugging sandbox"
-                              >
-                                Set to In Progress
-                              </button>
-                            )}
-
-                            {/* Action 2: Upload Proof Video */}
-                            <button
-                              onClick={() => openUploadModal(order, "video")}
-                              className="px-2.5 py-1 rounded-lg bg-[#09090b] hover:bg-zinc-800 text-zinc-200 border border-[#27272a] hover:border-cyan-500/40 text-[11px] font-semibold transition-all cursor-pointer flex items-center gap-1 whitespace-nowrap"
-                              title="Upload verified execution MP4/WebM"
-                            >
-                              <Video className="w-3 h-3 text-cyan-400" />
-                              <span>{order.proof_video_url ? "Reupload Video" : "Upload Proof Video"}</span>
-                            </button>
-
-                            {/* Action 3: Upload Fixed Solution */}
-                            <button
-                              onClick={() => openUploadModal(order, "fixed_zip")}
-                              className="px-2.5 py-1 rounded-lg bg-[#09090b] hover:bg-zinc-800 text-zinc-200 border border-[#27272a] hover:border-orange-500/40 text-[11px] font-semibold transition-all cursor-pointer flex items-center gap-1 whitespace-nowrap"
-                              title="Upload fixed solution (.zip) to deliverables bucket"
-                            >
-                              <FileArchive className="w-3 h-3 text-orange-400" />
-                              <span>{order.fixed_zip_url ? "Reupload Fixed Solution" : "Upload Fixed Solution"}</span>
-                            </button>
-
-                            {/* Action 4: Mark Completed */}
-                            {order.status !== "completed" && (
-                              <button
-                                onClick={() => handleMarkCompleted(order.order_code)}
-                                className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white border border-[#27272a] text-[11px] font-medium transition-all cursor-pointer flex items-center gap-1 whitespace-nowrap"
-                                title="Unlocks client download page at /order/[code]"
-                              >
-                                <CheckCircle2 className="w-3 h-3 text-zinc-400" />
-                                <span>Mark Completed</span>
-                              </button>
-                            )}
-                          </div>
+                          {renderRowActions(order)}
                         </td>
-
                       </tr>
                     );
                   })
