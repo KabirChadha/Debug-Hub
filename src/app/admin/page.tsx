@@ -102,6 +102,7 @@ function AdminDashboardContent() {
 
   // Dynamic Quote states
   const [quoteInputs, setQuoteInputs] = useState<Record<string, string>>({});
+  const [timeInputs, setTimeInputs] = useState<Record<string, string>>({});
   const [editingQuoteCodes, setEditingQuoteCodes] = useState<Record<string, boolean>>({});
   const [isSendingQuote, setIsSendingQuote] = useState<Record<string, boolean>>({});
 
@@ -349,10 +350,17 @@ function AdminDashboardContent() {
     }
   };
 
-  // Action: Set / Update Quoted Price
-  const handleSetQuote = async (orderCode: string, price: number) => {
-    if (isNaN(price) || price <= 0) {
-      alert("Please enter a valid quote price in ₹.");
+  // Action: Set / Update Quoted Price & Estimated Delivery Time
+  const handleSetQuote = async (
+    orderCode: string, 
+    inputPrice: string | number, 
+    estimatedTime: string
+  ) => {
+    const numericPrice = parseInt(String(inputPrice).replace(/[^0-9]/g, ''), 10);
+    const finalEstTime = estimatedTime?.trim() || "2-4 Hours";
+
+    if (isNaN(numericPrice) || numericPrice <= 0) {
+      alert("Please enter a valid price.");
       return;
     }
 
@@ -365,12 +373,14 @@ function AdminDashboardContent() {
       const { error: directError } = await supabase
         .from("orders")
         .update({
-          quoted_price: price,
+          quoted_price: numericPrice,
+          estimated_time: finalEstTime,
           payment_status: "unpaid",
           status: "quote_ready",
           updated_at: new Date().toISOString(),
         })
-        .eq("order_code", orderCode);
+        .eq("order_code", orderCode)
+        .select();
 
       updateError = directError;
 
@@ -383,7 +393,8 @@ function AdminDashboardContent() {
           },
           body: JSON.stringify({
             order_code: orderCode,
-            quoted_price: price,
+            quoted_price: numericPrice,
+            estimated_time: finalEstTime,
             payment_status: "unpaid",
             status: "quote_ready",
           }),
@@ -398,22 +409,22 @@ function AdminDashboardContent() {
       }
 
       if (updateError) {
-        alert("Failed to send quote: " + (updateError as Error).message);
+        alert(`Failed to save quote: ${(updateError as Error).message}`);
         return;
       }
 
       setOrders((prev) =>
         prev.map((o) =>
           o.order_code === orderCode
-            ? { ...o, quoted_price: price, payment_status: "unpaid", status: "quote_ready" }
+            ? { ...o, quoted_price: numericPrice, estimated_time: finalEstTime, payment_status: "unpaid", status: "quote_ready" }
             : o
         )
       );
 
       setEditingQuoteCodes((prev) => ({ ...prev, [orderCode]: false }));
       showToast(
-        `Quote Sent: #${orderCode}`,
-        `Custom quote of ₹${price} dispatched to client telemetry.`
+        `Quote Saved: #${orderCode}`,
+        `₹${numericPrice} • ETA: ${finalEstTime} dispatched to client telemetry.`
       );
       fetchOrders(adminKey);
     } catch (err: unknown) {
@@ -903,108 +914,168 @@ function AdminDashboardContent() {
       order.payment_status === "unquoted";
     const isEditing = editingQuoteCodes[order.order_code];
 
+    const currentPriceInput =
+      quoteInputs[order.order_code] !== undefined
+        ? quoteInputs[order.order_code]
+        : order.quoted_price
+        ? String(order.quoted_price)
+        : "";
+
+    const currentTimeInput =
+      timeInputs[order.order_code] !== undefined
+        ? timeInputs[order.order_code]
+        : order.estimated_time || "";
+
+    const timePresets = ["2 Hours", "4 Hours", "24 Hours", "2 Days"];
+
     return (
       <div className="flex flex-col gap-1.5 items-start">
         {/* If unquoted or currently editing quote */}
         {isUnquoted || isEditing ? (
-          <div className="flex items-center gap-1">
-            <input
-              type="number"
-              placeholder="Quote ₹"
-              value={
-                quoteInputs[order.order_code] !== undefined
-                  ? quoteInputs[order.order_code]
-                  : order.quoted_price
-                  ? String(order.quoted_price)
-                  : ""
-              }
-              onChange={(e) =>
-                setQuoteInputs((prev) => ({
-                  ...prev,
-                  [order.order_code]: e.target.value,
-                }))
-              }
-              className="w-20 bg-[#09090b] border border-orange-500/40 text-white text-xs px-2 py-1 rounded font-mono focus:outline-none focus:border-orange-500"
-            />
-            <button
-              type="button"
-              onClick={() => {
-                const val =
-                  quoteInputs[order.order_code] !== undefined
-                    ? Number(quoteInputs[order.order_code])
-                    : order.quoted_price || 0;
-                handleSetQuote(order.order_code, val);
-              }}
-              disabled={isSendingQuote[order.order_code]}
-              className="px-2 py-1 rounded bg-orange-500 hover:bg-orange-600 text-white font-bold text-[10px] cursor-pointer disabled:opacity-50 whitespace-nowrap shadow-[0_0_10px_rgba(249,115,22,0.3)]"
-            >
-              {isSendingQuote[order.order_code] ? "Sending..." : "Send Quote"}
-            </button>
-            {isEditing && (
-              <button
-                type="button"
-                onClick={() =>
-                  setEditingQuoteCodes((prev) => ({
+          <div className="flex flex-col gap-1.5 p-2 rounded-xl bg-[#09090b] border border-orange-500/40 w-full min-w-[240px]">
+            <div className="flex items-center gap-1.5">
+              <div className="relative flex-1">
+                <span className="absolute left-2 top-1.5 text-zinc-500 text-xs font-mono">₹</span>
+                <input
+                  type="text"
+                  placeholder="Amount"
+                  value={currentPriceInput}
+                  onChange={(e) =>
+                    setQuoteInputs((prev) => ({
+                      ...prev,
+                      [order.order_code]: e.target.value,
+                    }))
+                  }
+                  className="w-full bg-[#18181b] border border-zinc-700 text-white text-xs pl-5 pr-2 py-1 rounded font-mono focus:outline-none focus:border-orange-500"
+                />
+              </div>
+              <input
+                type="text"
+                placeholder='e.g. "3 Hours", "1-2 Days"'
+                value={currentTimeInput}
+                onChange={(e) =>
+                  setTimeInputs((prev) => ({
                     ...prev,
-                    [order.order_code]: false,
+                    [order.order_code]: e.target.value,
                   }))
                 }
-                className="text-zinc-500 hover:text-white p-0.5 text-xs cursor-pointer"
-                title="Cancel"
-              >
-                ✕
-              </button>
-            )}
-          </div>
-        ) : (
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {order.payment_status === "approved" ? (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 whitespace-nowrap">
-                <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                Approved (₹{order.quoted_price})
-              </span>
-            ) : order.payment_status === "verifying" ? (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30 whitespace-nowrap animate-pulse">
-                <Clock className="w-3 h-3 text-amber-400" />
-                Verifying UTR (₹{order.quoted_price})
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-zinc-800 text-zinc-300 border border-zinc-700 whitespace-nowrap">
-                Quoted: ₹{order.quoted_price}
-              </span>
-            )}
+                className="w-36 bg-[#18181b] border border-zinc-700 text-white text-xs px-2 py-1 rounded font-mono focus:outline-none focus:border-orange-500"
+              />
+            </div>
 
-            {order.payment_status !== "approved" && (
+            {/* Quick time selector pills */}
+            <div className="flex items-center gap-1 flex-wrap">
+              <span className="text-[10px] text-zinc-500 font-mono">ETA:</span>
+              {timePresets.map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() =>
+                    setTimeInputs((prev) => ({
+                      ...prev,
+                      [order.order_code]: preset,
+                    }))
+                  }
+                  className={`text-[10px] px-1.5 py-0.5 rounded font-mono transition-colors cursor-pointer ${
+                    currentTimeInput === preset
+                      ? "bg-orange-500 text-white font-bold"
+                      : "bg-[#18181b] hover:bg-zinc-800 text-zinc-300 border border-zinc-700"
+                  }`}
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-between gap-2 pt-1 border-t border-zinc-800">
+              {isEditing ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setEditingQuoteCodes((prev) => ({
+                      ...prev,
+                      [order.order_code]: false,
+                    }))
+                  }
+                  className="text-zinc-400 hover:text-white text-[10px] cursor-pointer"
+                >
+                  Cancel
+                </button>
+              ) : (
+                <span className="text-[10px] font-mono text-zinc-500">Unquoted</span>
+              )}
+
               <button
                 type="button"
                 onClick={() => {
-                  setQuoteInputs((prev) => ({
-                    ...prev,
-                    [order.order_code]: String(order.quoted_price || ""),
-                  }));
-                  setEditingQuoteCodes((prev) => ({
-                    ...prev,
-                    [order.order_code]: true,
-                  }));
+                  handleSetQuote(
+                    order.order_code,
+                    currentPriceInput,
+                    currentTimeInput || "2-4 Hours"
+                  );
                 }}
-                className="text-zinc-500 hover:text-orange-400 text-[10px] font-mono underline ml-0.5 cursor-pointer"
-                title="Adjust quote"
+                disabled={isSendingQuote[order.order_code]}
+                className="px-2.5 py-1 rounded bg-orange-500 hover:bg-orange-600 text-white font-bold text-[11px] cursor-pointer disabled:opacity-50 shadow-[0_0_10px_rgba(249,115,22,0.3)] flex items-center gap-1 ml-auto"
               >
-                Edit
+                {isSendingQuote[order.order_code] ? "Saving..." : "Save Quote"}
               </button>
-            )}
-          </div>
-        )}
-
-        {order.utr_number ? (
-          <div className="font-mono text-[11px] text-zinc-300">
-            <span className="text-zinc-500 text-[10px]">UTR: </span>
-            <span className="font-bold text-amber-300 select-all" title="Submitted UTR Number">
-              {order.utr_number}
-            </span>
+            </div>
           </div>
         ) : (
-          <span className="font-mono text-[10px] text-zinc-600 block">No UTR</span>
+          <div className="flex flex-col gap-1 items-start">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {order.payment_status === "approved" ? (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 whitespace-nowrap">
+                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                  Approved (₹{order.quoted_price}) • ETA: {order.estimated_time || "Delivered"}
+                </span>
+              ) : order.payment_status === "verifying" ? (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30 whitespace-nowrap animate-pulse">
+                  <Clock className="w-3 h-3 text-amber-400" />
+                  Verifying UTR (₹{order.quoted_price}) • ETA: {order.estimated_time || "Pending"}
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-zinc-800 text-zinc-300 border border-zinc-700 whitespace-nowrap">
+                  Quoted: ₹{order.quoted_price} • ETA: {order.estimated_time || "2-4 Hours"}
+                </span>
+              )}
+
+              {order.payment_status !== "approved" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuoteInputs((prev) => ({
+                      ...prev,
+                      [order.order_code]: String(order.quoted_price || ""),
+                    }));
+                    setTimeInputs((prev) => ({
+                      ...prev,
+                      [order.order_code]: order.estimated_time || "",
+                    }));
+                    setEditingQuoteCodes((prev) => ({
+                      ...prev,
+                      [order.order_code]: true,
+                    }));
+                  }}
+                  className="text-zinc-500 hover:text-orange-400 text-[10px] font-mono underline ml-0.5 cursor-pointer"
+                  title="Adjust quote & ETA"
+                >
+                  Edit
+                </button>
+              )}
+            </div>
+
+            {order.utr_number ? (
+              <div className="font-mono text-[11px] text-zinc-300">
+                <span className="text-zinc-500 text-[10px]">UTR: </span>
+                <span className="font-bold text-amber-300 select-all" title="Submitted UTR Number">
+                  {order.utr_number}
+                </span>
+              </div>
+            ) : (
+              <span className="font-mono text-[10px] text-zinc-600 block">No UTR</span>
+            )}
+          </div>
         )}
       </div>
     );
@@ -1503,8 +1574,8 @@ function AdminDashboardContent() {
                           {/* SLA & Status */}
                           <td className="py-4 px-4">
                             <div className="flex flex-col gap-1 items-start">
-                              <span className="text-[10px] font-mono text-orange-400 font-semibold bg-orange-500/10 border border-orange-500/20 px-2 py-0.5 rounded">
-                                ⚡ 1–2 Hr Triage
+                              <span className="text-[10px] font-mono text-amber-400 font-semibold bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded">
+                                ⚡ {order.estimated_time || "1–2 Hr Triage"}
                               </span>
                               {renderStatusBadge(order.status)}
                             </div>

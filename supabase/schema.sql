@@ -57,6 +57,7 @@ alter table public.orders add column if not exists service_type text default 'bu
 alter table public.orders add column if not exists project_title text;
 alter table public.orders add column if not exists requirements text;
 alter table public.orders add column if not exists quoted_price numeric;
+alter table public.orders add column if not exists estimated_time text;
 
 -- Enable Realtime publication on orders table
 do $$ begin

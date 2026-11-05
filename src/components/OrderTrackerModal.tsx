@@ -209,7 +209,7 @@ export function OrderTrackerModal({
             </div>
             <div>
               <span className="text-zinc-500 block">Turnaround SLA</span>
-              <span className="text-orange-400 font-medium">⚡ 90 Mins Express</span>
+              <span className="text-amber-400 font-medium">⚡ {liveOrder?.estimated_time || "Under Assessment"}</span>
             </div>
             <div>
               <span className="text-zinc-500 block">Guarantee Status</span>

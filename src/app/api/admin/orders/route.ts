@@ -46,6 +46,7 @@ export async function GET(request: NextRequest) {
             project_title: null,
             requirements: null,
             quoted_price: null,
+            estimated_time: null,
             issue_description: "Fatal: Unhandled CORS error on /api/predict when submitting POST from client. Exit code 1.",
             status: "submitted",
             file_name: "server_api.py",
@@ -68,6 +69,7 @@ export async function GET(request: NextRequest) {
             project_title: null,
             requirements: null,
             quoted_price: 650,
+            estimated_time: "2 Hours",
             issue_description: "Segmentation fault in graph traversal algorithm during memory reallocation.",
             status: "in_progress",
             file_name: "main_dijkstra.c",
@@ -90,6 +92,7 @@ export async function GET(request: NextRequest) {
             project_title: "Campus Blood Bank Management System",
             requirements: "Multi-hospital database schema with real-time stock alert triggers and donor search.",
             quoted_price: 1200,
+            estimated_time: "24 Hours",
             issue_description: "Deadlock on student table when bulk executing capstone registration transactions.",
             status: "proof_ready",
             file_name: "schema_migration.sql",
@@ -112,6 +115,7 @@ export async function GET(request: NextRequest) {
             project_title: "Smart Attendance System with Face Recognition",
             requirements: "Next.js frontend with FastAPI backend and SQLite database.",
             quoted_price: 1500,
+            estimated_time: "2 Days",
             issue_description: "Build failure in Next.js app router and repository architecture configuration.",
             status: "completed",
             file_name: "capstone_synopsis.docx",
@@ -150,6 +154,7 @@ export async function PATCH(request: NextRequest) {
       project_title,
       requirements,
       quoted_price,
+      estimated_time,
       proof_video_url, 
       fixed_zip_url, 
       deliverable_url,
@@ -173,6 +178,7 @@ export async function PATCH(request: NextRequest) {
     if (project_title !== undefined) updates.project_title = project_title;
     if (requirements !== undefined) updates.requirements = requirements;
     if (quoted_price !== undefined) updates.quoted_price = quoted_price === null ? null : Number(quoted_price);
+    if (estimated_time !== undefined) updates.estimated_time = estimated_time;
     if (proof_video_url !== undefined) updates.proof_video_url = proof_video_url;
     if (fixed_zip_url !== undefined) updates.fixed_zip_url = fixed_zip_url;
     if (deliverable_url !== undefined) updates.deliverable_url = deliverable_url;

@@ -24,6 +24,7 @@ export interface Database {
           project_title?: string | null;
           requirements?: string | null;
           quoted_price?: number | null;
+          estimated_time?: string | null;
           status: OrderStatus;
           file_name: string | null;
           file_storage_path: string | null;
@@ -53,6 +54,7 @@ export interface Database {
           project_title?: string | null;
           requirements?: string | null;
           quoted_price?: number | null;
+          estimated_time?: string | null;
           status?: OrderStatus;
           file_name?: string | null;
           file_storage_path?: string | null;
@@ -82,6 +84,7 @@ export interface Database {
           project_title?: string | null;
           requirements?: string | null;
           quoted_price?: number | null;
+          estimated_time?: string | null;
           status?: OrderStatus;
           file_name?: string | null;
           file_storage_path?: string | null;
@@ -118,6 +121,8 @@ export interface Database {
           contact_handle: string;
           tech_stack: string;
           issue_description: string;
+          quoted_price?: number | null;
+          estimated_time?: string | null;
           status: OrderStatus;
           file_name: string | null;
           file_storage_path: string | null;

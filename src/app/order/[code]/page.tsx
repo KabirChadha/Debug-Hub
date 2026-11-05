@@ -461,7 +461,7 @@ function OrderDetailsContent() {
           </div>
 
           {/* Quick Info Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-6 text-xs">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mt-6 text-xs">
             <div className="p-3.5 rounded-xl bg-[#09090b] border border-[#27272a]">
               <span className="text-zinc-500 block mb-1">Contact Handle</span>
               <span className="font-mono text-zinc-300 font-medium truncate block">
@@ -483,9 +483,17 @@ function OrderDetailsContent() {
               </span>
             </div>
             <div className="p-3.5 rounded-xl bg-[#09090b] border border-[#27272a]">
-              <span className="text-zinc-500 block mb-1">Rate &amp; SLA</span>
-              <span className="text-orange-400 font-medium">
-                {order.quoted_price ? `Quote: ₹${order.quoted_price} • Pay If Verified` : "Quote: Pending Assessment"}
+              <div className="flex flex-col gap-1">
+                <span className="text-zinc-400 text-xs uppercase tracking-wider font-mono">Turnaround SLA</span>
+                <span className="text-amber-400 font-medium flex items-center gap-1 truncate">
+                  ⚡ {order.estimated_time || "Under Assessment"}
+                </span>
+              </div>
+            </div>
+            <div className="p-3.5 rounded-xl bg-[#09090b] border border-[#27272a]">
+              <span className="text-zinc-500 block mb-1">Rate Quote</span>
+              <span className="text-orange-400 font-medium truncate block">
+                {order.quoted_price ? `₹${order.quoted_price} (Verified)` : "Pending Quote"}
               </span>
             </div>
             
@@ -495,7 +503,7 @@ function OrderDetailsContent() {
               {isPaidOrCompleted ? (
                 <span className="text-emerald-400 font-bold flex items-center gap-1">
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Status: Completed / Delivered</span>
+                  <span>Delivered</span>
                 </span>
               ) : isUtrPending ? (
                 <span className="text-amber-400 font-bold flex items-center gap-1 animate-pulse">
@@ -505,7 +513,7 @@ function OrderDetailsContent() {
               ) : (order.payment_status === "unquoted" || order.quoted_price === null || order.quoted_price === undefined) ? (
                 <span className="text-blue-400 font-medium flex items-center gap-1">
                   <Clock className="w-3.5 h-3.5" />
-                  <span>Awaiting Engineer Quote</span>
+                  <span>Assessing</span>
                 </span>
               ) : (
                 <span className="text-zinc-400 font-medium">
@@ -514,6 +522,37 @@ function OrderDetailsContent() {
               )}
             </div>
           </div>
+
+          {/* Quote Ready Banner */}
+          {order.quoted_price && !isPaidOrCompleted && (
+            <div className="mt-6 p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-amber-500/15 border border-amber-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-[0_0_25px_rgba(245,158,11,0.15)] animate-in fade-in duration-300">
+              <div className="flex items-center gap-3.5">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center flex-shrink-0">
+                  <Clock className="w-5 h-5 text-amber-400" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className="text-[10px] font-mono uppercase tracking-wider font-bold bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">
+                      OFFICIAL QUOTE
+                    </span>
+                    <span className="text-xs font-mono text-zinc-400 hidden sm:inline">Pay only if verified passing</span>
+                  </div>
+                  <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2 flex-wrap">
+                    <span>Quote Ready: <strong className="text-orange-400">₹{order.quoted_price}</strong></span>
+                    <span className="text-zinc-600 hidden sm:inline">|</span>
+                    <span className="text-zinc-300 font-normal">Estimated Delivery: <strong className="text-amber-400">{order.estimated_time || "2-4 Hours"}</strong></span>
+                  </h3>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 self-start sm:self-auto flex-shrink-0">
+                <span className="text-xs font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>Zero Risk Guarantee</span>
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* Engineering Progression Stepper: All 4 milestones checked when isPaidOrCompleted */}
           <div className="mt-8 pt-8 border-t border-[#27272a]">
@@ -574,11 +613,30 @@ function OrderDetailsContent() {
                       {step.title}
                     </h4>
                     <p className="text-[11px] text-zinc-400 mt-1 leading-snug">
-                      {isCompleted && idx === 3 ? "Handover complete & verified" : step.desc}
+                      {isCompleted && idx === 3
+                        ? "Handover complete & verified"
+                        : idx === 1 && order.estimated_time
+                        ? `Target Delivery: ${order.estimated_time}`
+                        : idx === 0 && order.estimated_time
+                        ? `Target Delivery: ${order.estimated_time}`
+                        : step.desc}
                     </p>
                   </div>
                 );
               })}
+            </div>
+
+            {/* Timeline Delivery Window Footer */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mt-4 pt-4 border-t border-[#27272a] text-xs text-zinc-400">
+              <div className="flex items-center gap-2 font-mono">
+                <Clock className="w-3.5 h-3.5 text-amber-400" />
+                <span>
+                  Delivery Window: <strong className="text-amber-400">{order.estimated_time || "Under Assessment"}</strong>
+                </span>
+              </div>
+              <span className="text-zinc-500 font-mono text-[11px]">
+                {order.quoted_price ? `Quote: ₹${order.quoted_price} • Pay only if verified passing` : "Awaiting engineering assessment"}
+              </span>
             </div>
           </div>
 
@@ -598,8 +656,8 @@ function OrderDetailsContent() {
                       <span>Workspace running in Antigravity sandbox...</span>
                     </h3>
                   </div>
-                  <span className="text-xs text-orange-400 font-mono">
-                    Estimated Handover: 45 Mins
+                  <span className="text-xs text-amber-400 font-mono">
+                    Estimated Handover: {order.estimated_time || "Under Assessment"}
                   </span>
                 </div>
 
@@ -794,7 +852,7 @@ function OrderDetailsContent() {
                       Project Under Assessment
                     </h3>
                     <p className="text-xs sm:text-sm text-zinc-400 mt-1">
-                      Our engineer is reviewing your requirements. A custom quote will be published here shortly (Turnaround: 15–30 mins).
+                      Our engineer is reviewing your requirements. A custom quote with delivery ETA will be published here shortly.
                     </p>
                   </div>
                 </div>
@@ -830,6 +888,11 @@ function OrderDetailsContent() {
                       Pledge Confirmation: ₹{order.quoted_price} via Merchant UPI
                     </h3>
                     <p className="text-xs sm:text-sm text-zinc-400 mt-1">
+                      {order.estimated_time && (
+                        <span className="text-amber-400 font-semibold block mb-0.5">
+                          ⚡ Estimated Delivery: {order.estimated_time}
+                        </span>
+                      )}
                       Your project is completely fixed and verified. Please complete payment of ₹{order.quoted_price} to unlock your complete fixed code package.
                     </p>
                   </div>
