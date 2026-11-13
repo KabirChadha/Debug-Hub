@@ -14,5 +14,4 @@ jobs:
         run: |
           curl -s -o /dev/null -w "%{http_code}" \
             "https://qbfghbdxslwcqtybumlv.supabase.co/rest/v1/orders?select=order_code&limit=1" \
-            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
-            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}"
+            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}"
