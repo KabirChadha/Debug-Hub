@@ -372,6 +372,19 @@ export function IntakeForm() {
         }),
       });
 
+      // Trigger instant Telegram push notification (fire-and-forget)
+      fetch("/api/notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "new_order",
+          order_code: orderCode,
+          service_type: serviceType,
+          stack: chosenStack,
+          details: serviceType === "custom_project" ? (projectTitle.trim() || requirements.trim()) : issueDescription.trim(),
+        }),
+      }).catch((notifyErr) => console.warn("Telegram notification error:", notifyErr));
+
       setUploadProgress(100);
       setStatusMessage("Order confirmed! Copying code to clipboard...");
 

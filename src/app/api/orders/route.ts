@@ -4,47 +4,6 @@ import type { UpdateOrder, OrderStatus } from "@/types/database.types";
 
 export const maxDuration = 30;
 
-/**
- * Asynchronously trigger Telegram notification to engineers
- * Format: 🚨 New Project Order: {order_code} | Stack: {tech_stack} | File: {file_name} | Description: {issue_description} | Link: {app_url}/admin
- */
-async function triggerTelegramNotification(
-  order: { order_code: string; tech_stack: string; issue_description: string; file_name?: string },
-  appUrl: string
-) {
-  const botToken = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
-
-  if (!botToken || !chatId) {
-    console.log("[Telegram] Notification skipped: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not configured.");
-    return;
-  }
-
-  const filePart = order.file_name ? ` | File: ${order.file_name}` : "";
-  const message = `🚨 New Project Order: ${order.order_code} | Stack: ${order.tech_stack}${filePart} | Description: ${order.issue_description} | Link: ${appUrl}/admin`;
-
-  try {
-    const telegramUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
-    const response = await fetch(telegramUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: message,
-      }),
-    });
-
-    if (!response.ok) {
-      const errDetails = await response.text();
-      console.warn("[Telegram] Notification dispatch failed:", errDetails);
-    } else {
-      console.log(`[Telegram] Alert dispatched for order ${order.order_code}`);
-    }
-  } catch (err: unknown) {
-    console.warn("[Telegram] Error dispatching webhook:", err);
-  }
-}
-
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -75,8 +34,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || request.nextUrl.origin || "http://localhost:3000";
-
     const resolvedStoragePath =
       file_storage_path ||
       zip_storage_path ||
@@ -85,17 +42,6 @@ export async function POST(request: NextRequest) {
     const resolvedFileName =
       file_name ||
       (resolvedStoragePath ? resolvedStoragePath.split("/").pop() : "project.zip");
-
-    // Asynchronously trigger Telegram alert without blocking response
-    triggerTelegramNotification(
-      {
-        order_code: order_code.trim().toUpperCase(),
-        tech_stack: tech_stack.trim(),
-        issue_description: issue_description.trim(),
-        file_name: resolvedFileName,
-      },
-      appUrl
-    ).catch((e) => console.warn("Telegram trigger error:", e));
 
     // Try inserting via server client (or admin client if service role is configured)
     const supabase = createAdminClient ? createAdminClient() : await createClient();

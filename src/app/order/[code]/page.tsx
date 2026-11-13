@@ -233,6 +233,18 @@ function OrderDetailsContent() {
       if (submitError) {
         alert("Failed to submit UTR: " + submitError);
       } else {
+        // Trigger instant Telegram push notification for submitted UTR
+        fetch("/api/notify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "utr_submitted",
+            order_code: orderCode,
+            utr: utrValue,
+            quoted_price: order?.quoted_price || undefined,
+          }),
+        }).catch((notifyErr) => console.warn("Telegram notification error:", notifyErr));
+
         await fetchOrder(); // re-fetch from database immediately
       }
     } catch (err: unknown) {
